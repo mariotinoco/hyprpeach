@@ -1,0 +1,371 @@
+--- Runs init.lua against a stubbed `hl`, so the pairing arithmetic and the
+--- dispatch ORDER can be checked without a compositor. Every case here is a
+--- mistake that is easy to make and silent when made.
+--
+-- Run: lua tests/hyprpeach.test.lua
+
+package.path = "./?/init.lua;./?.lua;" .. package.path
+
+local failures, checks = 0, 0
+
+local function check(parameters)
+  checks = checks + 1
+  if parameters.got ~= parameters.want then
+    failures = failures + 1
+    print(string.format("  FAIL %s\n       want: %s\n       got:  %s", parameters.label, tostring(parameters.want), tostring(parameters.got)))
+  end
+end
+
+--- A fresh stub compositor. `dispatched` records every dispatch in order,
+--- which is the only way to catch a paired switch that fires in the wrong one.
+local function stub_hyprland(parameters)
+  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {} }
+  local active_window = parameters.active_window
+  local active_workspace = parameters.active_workspace
+
+  _G.hl = {
+    dispatch = function(descriptor) recorder.dispatched[#recorder.dispatched + 1] = descriptor end,
+    bind = function(keys, action, options)
+      recorder.bound[keys] = options and options.description or true
+      recorder.actions[keys] = action
+    end,
+    unbind = function(keys) recorder.unbound[#recorder.unbound + 1] = keys end,
+    workspace_rule = function(rule) recorder.rules[#recorder.rules + 1] = rule end,
+    get_active_window = function() return active_window end,
+    get_active_workspace = function() return active_workspace end,
+    get_last_workspace = function() return parameters.last_workspace end,
+    get_windows = function() return parameters.windows or {} end,
+    get_window = function(selector) return selector end,
+    get_monitor = function(name) return (parameters.monitors or {})[name] end,
+    notification = { create = function(note) recorder.notifications[#recorder.notifications + 1] = note.text end },
+    dsp = {
+      focus = function(options) return { kind = "focus", options = options } end,
+      window = { move = function(options) return { kind = "move", options = options } end },
+      workspace = { swap_monitors = function(options) return { kind = "swap", options = options } end },
+    },
+  }
+  return recorder
+end
+
+local BOTTOM, TOP = "desc:BOTTOM-SERIAL", "desc:TOP-SERIAL"
+
+local function fresh_peach(parameters)
+  package.loaded.hyprpeach = nil
+  local recorder = stub_hyprland(parameters)
+  local peach = dofile("init.lua")
+  peach.setup({
+    monitors_bottom_to_top = { BOTTOM, TOP },
+    focus_follows_fling = parameters.focus_follows_fling,
+    notify = false,
+    keys = parameters.keys,
+  })
+  return peach, recorder
+end
+
+print("hyprpeach")
+
+-- --------------------------------------------------------------------------
+print("\nsetup refuses what it cannot honour")
+do
+  stub_hyprland({})
+  local peach = dofile("init.lua")
+
+  -- Only the monitors have no sensible default: nobody else knows what is on
+  -- your desk. Everything else falls back, so a first setup is one line.
+  local ok, message = pcall(function() peach.setup({}) end)
+  check({ label = "setup with no monitors is refused", got = ok, want = false })
+  check({ label = "and says which key it wanted", got = message:find("monitors_bottom_to_top", 1, true) ~= nil, want = true })
+
+  -- A typo in a chord name would otherwise bind nothing and report nothing.
+  local typo = pcall(function()
+    peach.setup({ monitors_bottom_to_top = { BOTTOM }, keys = { next_dektop = "SUPER + TAB" } })
+  end)
+  check({ label = "an unknown key name is refused, not ignored", got = typo, want = false })
+end
+
+-- --------------------------------------------------------------------------
+print("\nworkspace rules pin every desktop to every panel")
+do
+  local _, recorder = fresh_peach({})
+  check({ label = "2 panels x 10 desktops = 20 rules", got = #recorder.rules, want = 20 })
+  check({ label = "bottom desktop 1 is workspace 1", got = recorder.rules[1].workspace, want = "1" })
+  check({ label = "  ...on the bottom monitor", got = recorder.rules[1].monitor, want = BOTTOM })
+  check({ label = "  ...and is the default", got = recorder.rules[1].default, want = true })
+  check({ label = "bottom desktop 2 is NOT default", got = recorder.rules[2].default, want = false })
+  check({ label = "top desktop 1 is workspace 11", got = recorder.rules[11].workspace, want = "11" })
+  check({ label = "  ...on the top monitor", got = recorder.rules[11].monitor, want = TOP })
+  check({ label = "top desktop 10 is workspace 20", got = recorder.rules[20].workspace, want = "20" })
+  -- Without this an emptied workspace is destroyed and forgets its monitor.
+  check({ label = "every rule is persistent", got = recorder.rules[7].persistent, want = true })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe band is as wide as the desktop count, because it holds one each")
+do
+  -- There used to be a separate stride, which could be set smaller than the
+  -- count and would then silently overlap two monitors' bands. A band holds
+  -- exactly one workspace per desktop, so the two were always the same number
+  -- and one of them could only ever be wrong.
+  package.loaded.hyprpeach = nil
+  local recorder = stub_hyprland({})
+  local peach = dofile("init.lua")
+  peach.setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 4, notify = false })
+  check({ label = "4 desktops on 2 panels = 8 rules", got = #recorder.rules, want = 8 })
+  check({ label = "bottom band is 1-4", got = recorder.rules[4].workspace, want = "4" })
+  check({ label = "top band starts right after, at 5", got = recorder.rules[5].workspace, want = "5" })
+  check({ label = "  ...on the top monitor", got = recorder.rules[5].monitor, want = TOP })
+  check({ label = "top band ends at 8", got = recorder.rules[8].workspace, want = "8" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe number row is unbound BY KEYCODE")
+do
+  local _, recorder = fresh_peach({})
+  local unbound = table.concat(recorder.unbound, " ")
+  -- An unbind naming "SUPER + 1" matches nothing, leaves the default in place,
+  -- and then BOTH bindings fire on one press.
+  check({ label = "desktop 1 unbinds code:10", got = unbound:find("SUPER + code:10", 1, true) ~= nil, want = true })
+  -- Ten keys cleared even with eight desktops, or SUPER+9 stays bound to a
+  -- flat workspace and splits the desk.
+  check({ label = "the 9 and 0 keys are cleared too", got = unbound:find("SUPER + code:19", 1, true) ~= nil, want = true })
+  check({ label = "no unbind names a bare digit", got = unbound:find("SUPER %+ %d") == nil, want = true })
+  check({ label = "the monitor-hopping TAB is unbound", got = unbound:find("SUPER + TAB", 1, true) ~= nil, want = true })
+  check({ label = "desktop 1 is bound", got = recorder.bound["SUPER + code:10"], want = "Focus desktop 1" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nSUPER moves you, SUPER+SHIFT moves the window")
+do
+  local _, recorder = fresh_peach({})
+
+  -- The whole of what there is to learn, asserted.
+  check({ label = "SUPER+1 goes to a desktop", got = recorder.bound["SUPER + code:10"], want = "Focus desktop 1" })
+  check({ label = "SUPER+left goes to the one beside it", got = recorder.bound["SUPER + LEFT"], want = "Previous desktop" })
+  check({ label = "SUPER+right too", got = recorder.bound["SUPER + RIGHT"], want = "Next desktop" })
+
+  check({ label = "SUPER+SHIFT+1 flings a window there", got = recorder.bound["SUPER + SHIFT + code:10"], want = "Send window to desktop 1" })
+  check({ label = "and the tenth desktop is on code:19", got = recorder.bound["SUPER + code:19"], want = "Focus desktop 10" })
+  check({ label = "SUPER+SHIFT+left flings it one along", got = recorder.bound["SUPER + SHIFT + LEFT"], want = "Send window to the previous desktop" })
+  check({ label = "SUPER+SHIFT+right too", got = recorder.bound["SUPER + SHIFT + RIGHT"], want = "Send window to the next desktop" })
+
+  -- Up and down mean PANELS, because the panels are stacked.
+  check({ label = "SUPER+SHIFT+up flings it a panel up", got = recorder.bound["SUPER + SHIFT + UP"], want = "Send window to the panel above" })
+  check({ label = "SUPER+SHIFT+down, a panel down", got = recorder.bound["SUPER + SHIFT + DOWN"], want = "Send window to the panel below" })
+
+  -- Directional window focus survives on the axis the panels are stacked on.
+  check({ label = "SUPER+up is left to the compositor", got = recorder.bound["SUPER + UP"], want = nil })
+  check({ label = "SUPER+down as well", got = recorder.bound["SUPER + DOWN"], want = nil })
+  check({
+    label = "  ...and neither is unbound",
+    got = table.concat(recorder.unbound, " "):find("SUPER + UP", 1, true) == nil,
+    want = true,
+  })
+end
+
+-- --------------------------------------------------------------------------
+print("\na window flung sideways lands on the next desktop, same panel")
+do
+  -- Top panel, desktop 5 (workspace 15). One step along is desktop 6, and the
+  -- window must stay on the top panel: workspace 16, not 6.
+  local peach, recorder = fresh_peach({ active_window = { workspace = { id = 15 } } })
+  peach.send_active_window_to_relative_desktop({ step = 1, follow = false })
+  check({ label = "top desktop 5 -> top desktop 6 (16)", got = recorder.dispatched[1].options.workspace, want = "16" })
+
+  -- And it wraps, from the window's own desktop.
+  local wrap, wrap_recorder = fresh_peach({ active_window = { workspace = { id = 10 } } })
+  wrap.send_active_window_to_relative_desktop({ step = 1, follow = false })
+  check({ label = "bottom desktop 10 wraps to desktop 1", got = wrap_recorder.dispatched[1].options.workspace, want = "1" })
+end
+
+-- --------------------------------------------------------------------------
+print("\na chord set to false is skipped, but the stock one still goes")
+do
+  local _, recorder = fresh_peach({})
+  -- Off by default: worth having, not worth a key.
+  check({ label = "swap_panels is not bound by default", got = recorder.bound["SUPER + CTRL + S"], want = nil })
+  check({ label = "gather is not bound by default", got = recorder.bound["SUPER + CTRL + G"], want = nil })
+
+  -- Declining a shortcut must not mean inheriting the stock binding's bug: the
+  -- conflicting default is removed whether or not hyprpeach takes the chord.
+  local peach = package.loaded.hyprpeach
+  local _ = peach
+  local trimmed, trimmed_recorder = fresh_peach({ keys = { previous_desktop_arrow = false } })
+  local __ = trimmed
+  check({ label = "a false chord binds nothing", got = trimmed_recorder.bound["SUPER + LEFT"], want = nil })
+  check({
+    label = "  ...and stock SUPER+TAB is cleared regardless",
+    got = table.concat(trimmed_recorder.unbound, " "):find("SUPER + TAB", 1, true) ~= nil,
+    want = true,
+  })
+end
+
+-- --------------------------------------------------------------------------
+print("\nfocus_desktop moves every panel, bottom LAST")
+do
+  local peach, recorder = fresh_peach({})
+  peach.focus_desktop({ desktop = 3 })
+  check({ label = "one dispatch per panel", got = #recorder.dispatched, want = 2 })
+  -- Focus follows whichever half switched last, and eye level is the bottom
+  -- panel. Reverse these two lines and your focus lands on the wrong screen
+  -- every single time.
+  check({ label = "top panel (13) switches first", got = recorder.dispatched[1].options.workspace, want = "13" })
+  check({ label = "bottom panel (3) switches last", got = recorder.dispatched[2].options.workspace, want = "3" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nsending a window keeps it on its own panel")
+do
+  -- A window on the TOP panel: workspace 15 is top's desktop 5.
+  local peach, recorder = fresh_peach({ active_window = { workspace = { id = 15 } } })
+  peach.send_active_window_to_desktop({ desktop = 2, follow = false })
+  check({ label = "a top-panel window goes to top's desktop 2 (12)", got = recorder.dispatched[1].options.workspace, want = "12" })
+  -- The move dispatcher's own follow switches the window's monitor and only
+  -- that one, which is the split the whole library exists to prevent.
+  check({ label = "the move itself never follows", got = recorder.dispatched[1].options.follow, want = false })
+  check({ label = "follow=false dispatches nothing else", got = #recorder.dispatched, want = 1 })
+
+  local bottom_peach, bottom_recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
+  bottom_peach.send_active_window_to_desktop({ desktop = 2, follow = false })
+  check({ label = "a bottom-panel window goes to bottom's desktop 2", got = bottom_recorder.dispatched[1].options.workspace, want = "2" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nfocus_follows_fling decides whether your eyes follow")
+do
+  -- Named after `focus follows mouse`: the pointer of attention ends up where
+  -- the thing you just acted on is.
+  local peach, recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
+  peach.send_active_window_to_desktop({ desktop = 7, follow = false })
+  check({ label = "not following is one dispatch: the move", got = #recorder.dispatched, want = 1 })
+
+  local following, follow_recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
+  following.send_active_window_to_desktop({ desktop = 7, follow = true })
+  -- move, then both panels, then re-focus the window it just sent.
+  check({ label = "following = move + 2 panels + refocus", got = #follow_recorder.dispatched, want = 4 })
+  check({ label = "  ...and ends on the window", got = follow_recorder.dispatched[4].options.window ~= nil, want = true })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe send bindings read the config field, not a mode")
+do
+  -- Default off: the plain send does not follow, and the ALT variant does.
+  local _, recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
+  check({ label = "plain send is bound", got = recorder.bound["SUPER + SHIFT + code:12"], want = "Send window to desktop 3" })
+  -- Off by default now: the rule covers the day without it.
+  check({ label = "the follow escape hatch is off by default", got = recorder.bound["SUPER + SHIFT + ALT + code:12"], want = nil })
+  -- ...but the stock binding on that chord is still cleared, or it would go on
+  -- moving windows to flat workspaces behind your back.
+  check({
+    label = "  ...and stock SUPER+SHIFT+ALT+3 is cleared anyway",
+    got = table.concat(recorder.unbound, " "):find("SUPER + SHIFT + ALT + code:12", 1, true) ~= nil,
+    want = true,
+  })
+
+  -- Press the key for real. This is the whole point of the change: out of the
+  -- box, sending a window must NOT drag your view along with it.
+  recorder.actions["SUPER + SHIFT + code:12"]()
+  -- BY DEFAULT the view goes with the window: move, both panels, refocus.
+  check({ label = "BY DEFAULT a fling takes the view along", got = #recorder.dispatched, want = 4 })
+  check({ label = "  ...starting with the move", got = recorder.dispatched[1].kind, want = "move" })
+  check({ label = "  ...to bottom desktop 3", got = recorder.dispatched[1].options.workspace, want = "3" })
+  check({ label = "  ...and ending on the window", got = recorder.dispatched[4].options.window ~= nil, want = true })
+
+  -- Opting out makes a fling pure tidying.
+  local opted, opted_recorder = fresh_peach({ active_window = { workspace = { id = 5 } }, focus_follows_fling = false })
+  local _ = opted
+  opted_recorder.actions["SUPER + SHIFT + code:12"]()
+  check({ label = "focus_follows_fling = false leaves you put", got = #opted_recorder.dispatched, want = 1 })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthrowing a window at the other panel keeps its desktop")
+do
+  -- Bottom panel, desktop 5 (workspace 5) -> top panel, still desktop 5 (15).
+  local peach, recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
+  peach.send_active_window_to_panel({ step = 1, follow = false })
+  check({ label = "bottom desktop 5 -> top desktop 5 (15)", got = recorder.dispatched[1].options.workspace, want = "15" })
+
+  -- There is no panel above the top one, and wrapping to the bottom would be a
+  -- surprise, so this does nothing rather than something clever.
+  local top_peach, top_recorder = fresh_peach({ active_window = { workspace = { id = 15 } } })
+  top_peach.send_active_window_to_panel({ step = 1, follow = false })
+  check({ label = "off the top of the stack does nothing", got = #top_recorder.dispatched, want = 0 })
+end
+
+-- --------------------------------------------------------------------------
+print("\ndesktops wrap, special workspaces are left alone")
+do
+  local peach, recorder = fresh_peach({ active_workspace = { id = 1 } })
+  peach.step_desktop({ step = -1 })
+  -- Lua's % is non-negative for a positive divisor, so this needs no special case.
+  check({ label = "stepping back off desktop 1 wraps to 10", got = recorder.dispatched[2].options.workspace, want = "10" })
+
+  local wrap_peach, wrap_recorder = fresh_peach({ active_workspace = { id = 10 } })
+  wrap_peach.step_desktop({ step = 1 })
+  check({ label = "stepping past desktop 10 wraps to 1", got = wrap_recorder.dispatched[2].options.workspace, want = "1" })
+
+  -- A scratchpad has no desktop to bring the other panels to.
+  local special_peach, special_recorder = fresh_peach({ active_workspace = { id = -99 } })
+  special_peach.step_desktop({ step = 1 })
+  check({ label = "a special workspace dispatches nothing", got = #special_recorder.dispatched, want = 0 })
+  check({ label = "and has no desktop", got = special_peach.current_desktop(), want = nil })
+end
+
+-- --------------------------------------------------------------------------
+print("\nstranded windows are rescued, paired windows are not touched")
+do
+  local windows = {
+    { workspace = { id = 5 } },    -- bottom desktop 5, fine
+    { workspace = { id = 15 } },   -- top desktop 5, fine
+    { workspace = { id = 47 } },   -- outside every band: a monitor went away
+    { workspace = { id = -3 } },   -- special: not stranded, deliberately elsewhere
+  }
+  local peach, recorder = fresh_peach({ windows = windows, active_workspace = { id = 2 } })
+  peach.gather_rogue_windows()
+  check({ label = "only the stranded window is moved", got = #recorder.dispatched, want = 1 })
+  check({ label = "onto the desktop in front of you", got = recorder.dispatched[1].options.workspace, want = "2" })
+end
+
+-- --------------------------------------------------------------------------
+print("\ndescribe() names a split the bars cannot show")
+do
+  local monitors = {
+    [BOTTOM] = { active_workspace = { id = 5 } },
+    [TOP] = { active_workspace = { id = 15 } },
+  }
+  local peach = fresh_peach({ monitors = monitors })
+  check({ label = "matching desktops read as paired", got = peach.describe():find("[paired]", 1, true) ~= nil, want = true })
+
+  monitors[TOP] = { active_workspace = { id = 17 } }
+  local split_peach = fresh_peach({ monitors = monitors })
+  check({ label = "a split is called out loudly", got = split_peach.describe():find("PANELS DISAGREE", 1, true) ~= nil, want = true })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe README documents exactly the chords the code defines")
+do
+  local function names_in(path, from, to)
+    local file = assert(io.open(path, "r"))
+    local contents = file:read("*a")
+    file:close()
+    local section = contents:match(from .. "(.-)" .. to) or ""
+    local found = {}
+    for name in section:gmatch("([%a_]+)%s+=%s+[\"f]") do found[name] = true end
+    return found
+  end
+
+  -- A README that drifts from the defaults is worse than no README: every
+  -- name in it is something a reader will paste into their own config.
+  local code = names_in("init.lua", "  keys = {", "  },")
+  local docs = names_in("README.md", "  keys = {", "  },")
+  local missing, extra = {}, {}
+  for name in pairs(code) do if not docs[name] then missing[#missing + 1] = name end end
+  for name in pairs(docs) do if not code[name] then extra[#extra + 1] = name end end
+  table.sort(missing)
+  table.sort(extra)
+  check({ label = "no chord is undocumented", got = table.concat(missing, ","), want = "" })
+  check({ label = "no documented chord is invented", got = table.concat(extra, ","), want = "" })
+end
+
+print(string.format("\n%s  %d checks, %d failed", failures == 0 and "PASS" or "FAIL", checks, failures))
+os.exit(failures == 0 and 0 or 1)

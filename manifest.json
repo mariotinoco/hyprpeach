@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "hyprpeach.desktops",
+  "name": "Desktops",
+  "version": "1.0.0",
+  "author": "hyprpeach",
+  "description": "Desktop indicators for hyprpeach \u2014 a per-panel bar widget, and a big number on screen when the desktop changes",
+  "kinds": [
+    "bar-widget",
+    "panel"
+  ],
+  "entryPoints": {
+    "barWidget": "omarchy/Desktops.qml",
+    "panel": "omarchy/DesktopOsd.qml"
+  },
+  "barWidget": {
+    "displayName": "Desktops",
+    "description": "Desktop indicators for hyprpeach \u2014 a per-panel bar widget, and a big number on screen when the desktop changes",
+    "category": "Compositor",
+    "defaultSection": "left",
+    "allowMultiple": false
+  },
+  "keepLoaded": true
+}

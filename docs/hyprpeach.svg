@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 556" width="1040" height="556" role="img" aria-labelledby="diagram-title diagram-description">
+  <title id="diagram-title">hyprpeach: a desktop is a set of workspaces, one per monitor</title>
+  <desc id="diagram-description">Left: with Hyprland's default bindings, pressing super+2 teleports focus to whichever monitor happens to own workspace 2, and the other monitor does not move. Right: with hyprpeach, monitors hold fixed bands of workspaces (bottom 1 to 10, top 11 to 20) and one press of super+2 moves both panels to their own desktop 2 at once.</desc>
+  <style>
+    :root { color-scheme: light dark; }
+    .surface   { fill: #F7F8FA; stroke: #D8DBE3; }
+    .surface-2 { fill: #FFFFFF; stroke: #E4E7ED; }
+    .chip      { fill: #EDEFF3; stroke: #DCE0E7; }
+    .chip-on   { fill: #FF8A5B; stroke: #F2703C; }
+    .chip-txt  { fill: #6B7280; }
+    .chip-on-t { fill: #FFFFFF; }
+    .h1        { fill: #171B24; }
+    .h2        { fill: #171B24; }
+    .muted     { fill: #6B7280; }
+    .peach     { fill: #E9612B; }
+    .warn      { fill: #D4453D; }
+    .rule      { stroke: #E4E7ED; }
+    .arrow     { stroke: #FF8A5B; fill: none; }
+    .arrow-bad { stroke: #D4453D; fill: none; }
+    .arrowhead { fill: #FF8A5B; }
+    .arrowbad  { fill: #D4453D; }
+    .keycap    { fill: #FFFFFF; stroke: #C9CDD6; }
+    .keycap-t  { fill: #171B24; }
+    .band      { fill: #FFF3ED; stroke: #FFD9C6; }
+    @media (prefers-color-scheme: dark) {
+      .surface   { fill: #171B22; stroke: #2E3542; }
+      .surface-2 { fill: #0F1318; stroke: #262C36; }
+      .chip      { fill: #1E242E; stroke: #2E3542; }
+      .chip-on   { fill: #FF9E7A; stroke: #FFB595; }
+      .chip-txt  { fill: #949CAB; }
+      .chip-on-t { fill: #1A1208; }
+      .h1        { fill: #EDEFF4; }
+      .h2        { fill: #EDEFF4; }
+      .muted     { fill: #949CAB; }
+      .peach     { fill: #FF9E7A; }
+      .warn      { fill: #F2766E; }
+      .rule      { stroke: #262C36; }
+      .arrow     { stroke: #FF9E7A; }
+      .arrow-bad { stroke: #F2766E; }
+      .arrowhead { fill: #FF9E7A; }
+      .arrowbad  { fill: #F2766E; }
+      .keycap    { fill: #1E242E; stroke: #3A4150; }
+      .keycap-t  { fill: #EDEFF4; }
+      .band      { fill: #2A1B13; stroke: #4A3025; }
+    }
+    text { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  </style>
+
+  <text x="28" y="40" class="h1" font-size="27" font-weight="700">hyprpeach</text>
+  <text x="190" y="40" class="muted" font-size="16">a desktop is a <tspan class="peach" font-weight="600">set</tspan> of workspaces — one pinned to every monitor</text>
+  <line x1="28" y1="60" x2="1012" y2="60" class="rule" stroke-width="1"/>
+
+  <!-- ============================= LEFT: default ============================= -->
+  <text x="28" y="92" class="h2" font-size="14" font-weight="700">HYPRLAND DEFAULT</text>
+  <text x="192" y="92" class="warn" font-size="13">one dispatch — only ever moves one screen</text>
+
+  <rect x="28" y="106" width="456" height="82" rx="9" class="surface-2" stroke-width="1.5"/>
+  <text x="44" y="131" class="muted" font-size="11" font-weight="600">TOP PANEL</text>
+  <rect x="44" y="142" width="40" height="30" rx="6" class="chip-on" stroke-width="1.5"/>
+  <text x="64" y="162" class="chip-on-t mono" font-size="14" font-weight="700" text-anchor="middle">1</text>
+  <rect x="92" y="142" width="40" height="30" rx="6" class="chip" stroke-width="1"/>
+  <text x="112" y="162" class="chip-txt mono" font-size="14" text-anchor="middle">3</text>
+  <rect x="140" y="142" width="40" height="30" rx="6" class="chip" stroke-width="1"/>
+  <text x="160" y="162" class="chip-txt mono" font-size="14" text-anchor="middle">7</text>
+  <text x="196" y="162" class="muted" font-size="12.5">whatever was created here, in whatever order</text>
+
+  <rect x="28" y="196" width="456" height="82" rx="9" class="surface-2" stroke-width="1.5"/>
+  <text x="44" y="221" class="muted" font-size="11" font-weight="600">BOTTOM PANEL</text>
+  <rect x="44" y="232" width="40" height="30" rx="6" class="chip" stroke-width="1"/>
+  <text x="64" y="252" class="chip-txt mono" font-size="14" text-anchor="middle">5</text>
+  <text x="100" y="252" class="muted" font-size="12.5">workspace 2 does not exist on either panel</text>
+
+  <g class="mono">
+    <rect x="28" y="300" width="92" height="30" rx="6" class="keycap" stroke-width="1.5"/>
+    <text x="74" y="320" class="keycap-t" font-size="13" font-weight="600" text-anchor="middle">super+2</text>
+  </g>
+  <path d="M 130 315 L 178 315" class="arrow-bad" stroke-width="2"/>
+  <polygon points="178,310 190,315 178,320" class="arrowbad"/>
+  <text x="200" y="320" class="warn" font-size="13" font-weight="600">focus teleports to the other screen</text>
+
+  <text x="28" y="352" class="muted" font-size="12.5">A workspace binds to whichever monitor had focus when it was born, and</text>
+  <text x="28" y="370" class="muted" font-size="12.5">an empty one is <tspan class="warn" font-weight="600">destroyed</tspan> — so the mapping is not just arbitrary, it</text>
+  <text x="28" y="388" class="muted" font-size="12.5">forgets itself. The panel you are looking at often does not move at all.</text>
+
+  <line x1="516" y1="80" x2="516" y2="400" class="rule" stroke-width="1"/>
+
+  <!-- ============================= RIGHT: hyprpeach ============================= -->
+  <text x="556" y="92" class="h2" font-size="14" font-weight="700">HYPRPEACH</text>
+  <text x="668" y="92" class="peach" font-size="13" font-weight="600">one press — every panel, together</text>
+
+  <rect x="556" y="106" width="456" height="82" rx="9" class="surface" stroke-width="1.5"/>
+  <text x="572" y="131" class="muted" font-size="11" font-weight="600">TOP PANEL</text>
+  <text x="644" y="131" class="muted mono" font-size="10.5">·  band 11–20</text>
+  <g class="mono" font-size="12">
+    <rect x="572" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="589" y="161" class="chip-txt" text-anchor="middle">11</text>
+    <rect x="610" y="142" width="34" height="28" rx="5" class="chip-on" stroke-width="1.5"/><text x="627" y="161" class="chip-on-t" font-weight="700" text-anchor="middle">12</text>
+    <rect x="648" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="665" y="161" class="chip-txt" text-anchor="middle">13</text>
+    <rect x="686" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="703" y="161" class="chip-txt" text-anchor="middle">14</text>
+    <rect x="724" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="741" y="161" class="chip-txt" text-anchor="middle">15</text>
+    <rect x="762" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="779" y="161" class="chip-txt" text-anchor="middle">16</text>
+    <rect x="800" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="817" y="161" class="chip-txt" text-anchor="middle">17</text>
+    <rect x="838" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="855" y="161" class="chip-txt" text-anchor="middle">18</text>
+    <rect x="876" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="893" y="161" class="chip-txt" text-anchor="middle">19</text>
+    <rect x="914" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="931" y="161" class="chip-txt" text-anchor="middle">20</text>
+  </g>
+  <text x="962" y="161" class="peach mono" font-size="16" font-weight="700">↑</text>
+
+  <rect x="556" y="196" width="456" height="82" rx="9" class="surface" stroke-width="1.5"/>
+  <text x="572" y="221" class="muted" font-size="11" font-weight="600">BOTTOM PANEL</text>
+  <text x="664" y="221" class="muted mono" font-size="10.5">·  band 1–10  ·  eye level, keeps the focus</text>
+  <g class="mono" font-size="12">
+    <rect x="572" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="589" y="251" class="chip-txt" text-anchor="middle">1</text>
+    <rect x="610" y="232" width="34" height="28" rx="5" class="chip-on" stroke-width="1.5"/><text x="627" y="251" class="chip-on-t" font-weight="700" text-anchor="middle">2</text>
+    <rect x="648" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="665" y="251" class="chip-txt" text-anchor="middle">3</text>
+    <rect x="686" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="703" y="251" class="chip-txt" text-anchor="middle">4</text>
+    <rect x="724" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="741" y="251" class="chip-txt" text-anchor="middle">5</text>
+    <rect x="762" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="779" y="251" class="chip-txt" text-anchor="middle">6</text>
+    <rect x="800" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="817" y="251" class="chip-txt" text-anchor="middle">7</text>
+    <rect x="838" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="855" y="251" class="chip-txt" text-anchor="middle">8</text>
+    <rect x="876" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="893" y="251" class="chip-txt" text-anchor="middle">9</text>
+    <rect x="914" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="931" y="251" class="chip-txt" text-anchor="middle">10</text>
+  </g>
+  <text x="962" y="251" class="peach mono" font-size="16" font-weight="700">↑</text>
+
+  <g class="mono">
+    <rect x="556" y="300" width="92" height="30" rx="6" class="keycap" stroke-width="1.5"/>
+    <text x="602" y="320" class="keycap-t" font-size="13" font-weight="600" text-anchor="middle">super+2</text>
+  </g>
+  <path d="M 658 315 L 706 315" class="arrow" stroke-width="2"/>
+  <polygon points="706,310 718,315 706,320" class="arrowhead"/>
+  <text x="728" y="320" class="peach" font-size="13" font-weight="600">both panels move. focus stays put.</text>
+
+  <text x="556" y="352" class="muted" font-size="12.5">Every desktop is <tspan class="peach" font-weight="600">persistent</tspan> and pinned by EDID serial, so it survives being</text>
+  <text x="556" y="370" class="muted" font-size="12.5">emptied and never changes screens — not even when you move a cable.</text>
+  <text x="556" y="388" class="muted" font-size="12.5">Desktops switch top-down so the bottom panel is left holding the focus.</text>
+
+  <!-- ============================= the formula ============================= -->
+  <rect x="28" y="420" width="984" height="112" rx="11" class="band" stroke-width="1.5"/>
+  <text x="52" y="452" class="h2" font-size="13.5" font-weight="700">THE WHOLE MODEL, IN ONE LINE</text>
+
+  <text x="52" y="488" class="mono peach" font-size="21" font-weight="700">desktop N  =  { N,  N + count,  N + 2·count,  … }</text>
+  <text x="52" y="512" class="muted" font-size="12.5">One workspace per monitor, bottom panel first — `count` is how many desktops you have, so on the bottom panel desktop N is workspace N.</text>
+  
+
+</svg>

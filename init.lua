@@ -1,0 +1,557 @@
+--- hyprpeach 🍑 — an opinionated way for monitors and workspaces to interact.
+---
+--- THE ONE IDEA. Hyprland cannot show a single workspace on two monitors at
+--- once; asked directly, its maintainer's answer was "you can't do that"
+--- (Hyprland discussion #10088). So a *desktop* here is not a workspace. A
+--- desktop is a SET of workspaces, one pinned to each monitor, and every
+--- desktop-level action dispatches once per monitor. Press the key for desktop
+--- 3 and every panel shows its own desktop 3, together, always.
+---
+--- WHAT THIS IS NOT. hyprsplit and split-monitor-workspaces implement the
+--- awesome/dwm model, where each monitor browses its own workspaces
+--- independently and the number keys move only the focused one. That model is
+--- good and this is not a replacement for it. This is the other model: the
+--- panels move as one surface. Pick whichever matches how you think about a
+--- multi-monitor desk. See README.md for credits and prior art.
+---
+--- CONVENTIONS. Every function takes a single table, so a call site reads as
+--- what it does rather than as a list of positions. `setup` requires only
+--- `monitors_bottom_to_top`, because nobody else knows what is on your desk;
+--- everything else falls back to DEFAULTS below, which are tuned so that a
+--- stock Omarchy or Hyprland keymap keeps working. A name it does not
+--- recognise is refused rather than ignored -- an unrecognised field in a Lua
+--- table is simply absent, so a typo would otherwise do nothing and say
+--- nothing.
+
+local peach = {}
+
+--- Everything `setup` did not have to be told.
+---
+--- These are tuned for a stock Omarchy/Hyprland keymap: the number row and the
+--- TAB chords match what those already bind, so the replacements land on the
+--- keys muscle memory expects, and the additions sit on chords checked against
+--- Omarchy's defaults. Only `monitors_bottom_to_top` has no sensible default,
+--- because nobody else knows what is on your desk.
+local DEFAULTS = {
+  --- How many desktops, and therefore how wide each monitor's band of
+  --- workspace IDs is -- they are the same number because a band holds exactly
+  --- one workspace per desktop. Ten desktops puts the bottom monitor on
+  --- workspaces 1-10 and the next one up on 11-20.
+  desktop_count = 10,
+
+  --- WHETHER YOUR VIEW FOLLOWS A WINDOW YOU FLING.
+  ---
+  --- Named after `focus follows mouse`, and true for the same reason: the
+  --- pointer of attention should end up where the thing you just acted on is.
+  --- Flinging a window to another desktop or another panel is a decision about
+  --- where you are going to work next, so the view goes with it.
+  ---
+  --- Set it false and a fling becomes purely an act of tidying: the window
+  --- leaves and you carry on where you are.
+  focus_follows_fling = true,
+
+  notify = true,
+  unbind_conflicting_defaults = true,
+
+  --- ONE RULE: SUPER MOVES YOU, SUPER+SHIFT MOVES THE WINDOW.
+  ---
+  --- It holds for both halves of the keyboard, which is the whole of what
+  --- there is to learn:
+  ---
+  ---   SUPER + 1..0          go to that desktop
+  ---   SUPER + left/right    go to the desktop beside it
+  ---   SUPER + SHIFT + 1..0        fling the window to that desktop
+  ---   SUPER + SHIFT + left/right  fling it to the desktop beside this one
+  ---   SUPER + SHIFT + up/down     fling it to the panel above or below
+  ---
+  --- Up and down mean panels because panels are stacked; left and right mean
+  --- desktops because desktops are a strip. The gesture is the same in both
+  --- directions, so there is nothing to remember beyond the rule.
+  ---
+  --- THIS DISPLACES STOCK BINDINGS, DELIBERATELY. SUPER + left/right is
+  --- directional window focus in stock Omarchy, and SUPER + SHIFT + arrows is
+  --- window swapping. They are given up on purpose: on a two-panel desk the
+  --- desktop strip is travelled far more often than a window is nudged one
+  --- place left. SUPER + up/down is left alone, so directional focus survives
+  --- on the axis where the panels are stacked.
+  ---
+  --- Everything else is `false` -- bound to nothing, and the stock chord
+  --- cleared so it cannot split the desk behind your back. Name a chord to
+  --- bring any of them back.
+  keys = {
+    -- Numbers: absolute.
+    focus_desktop_modifier          = "SUPER",
+    send_window_modifier            = "SUPER + SHIFT",
+
+    -- Arrows: relative.
+    previous_desktop_arrow          = "SUPER + LEFT",
+    next_desktop_arrow              = "SUPER + RIGHT",
+    send_window_to_previous_desktop = "SUPER + SHIFT + LEFT",
+    send_window_to_next_desktop     = "SUPER + SHIFT + RIGHT",
+    send_window_to_panel_above      = "SUPER + SHIFT + UP",
+    send_window_to_panel_below      = "SUPER + SHIFT + DOWN",
+
+    -- Off. Real capabilities, still callable as `peach.*`; they simply do not
+    -- earn a key when the rule above already covers the day.
+    send_window_and_follow_modifier = false,
+    next_desktop                    = false,
+    previous_desktop                = false,
+    former_desktop                  = false,
+    next_desktop_scroll             = false,
+    previous_desktop_scroll         = false,
+    swap_panels                     = false,
+    gather_rogue_windows            = false,
+  },
+}
+
+--- The chords stock Hyprland and Omarchy bind to single-dispatch workspace
+--- actions.
+---
+--- Cleared on setup whatever `keys` says, and this is the part that cannot be
+--- derived from `keys`: a chord hyprpeach declines to bind is not a chord that
+--- falls silent. It is the stock one, still live, still moving a single panel.
+--- Turning a hyprpeach binding off has to mean the key does nothing -- not
+--- that it quietly goes back to splitting the desk.
+local STOCK_NUMBER_ROW_MODIFIERS = { "SUPER", "SUPER + SHIFT", "SUPER + SHIFT + ALT" }
+local STOCK_WORKSPACE_CHORDS = {
+  "SUPER + TAB", "SUPER + SHIFT + TAB", "SUPER + CTRL + TAB",
+  "SUPER + mouse_down", "SUPER + mouse_up",
+}
+
+--- Populated by `setup`. Nothing here is written anywhere else.
+local state = {
+  desktop_count = nil,
+  --- Bottom-to-top. A paired switch walks this BACKWARDS so the bottom panel
+  --- switches last and therefore keeps the focus; on a desk with stacked
+  --- monitors the bottom one is at eye level.
+  bands = nil,
+  focus_follows_fling = nil,
+  notify = nil,
+}
+
+-- ---------------------------------------------------------------------------
+-- notification
+-- ---------------------------------------------------------------------------
+
+--- Hyprland's own notification, so the library needs no notification daemon and
+--- no external command. `text` is the key that carries the message: an unknown
+--- key in a Lua options table is not an error, it is simply absent, so a
+--- misspelling here would produce a silent empty toast rather than a failure.
+local function announce(parameters)
+  if not state.notify then return end
+  hl.notification.create({ text = "🍑 " .. parameters.text, time = 1400 })
+end
+
+-- ---------------------------------------------------------------------------
+-- the pairing arithmetic, stated once
+-- ---------------------------------------------------------------------------
+
+--- Which band — which monitor, as a 1-based index into `state.bands` — a
+--- workspace ID belongs to.
+local function band_index_of_workspace(parameters)
+  return math.floor((parameters.workspace_id - 1) / state.desktop_count) + 1
+end
+
+--- The workspace ID that shows `desktop` on the band at `band_index`.
+local function workspace_id_for(parameters)
+  return state.bands[parameters.band_index].workspace_band_start + parameters.desktop
+end
+
+--- The desktop a workspace shows, or nil when that workspace is not part of any
+--- band. Special and named workspaces carry IDs <= 0 and a scratchpad has no
+--- desktop to bring the other panels to, so nil is the honest answer rather
+--- than a plausible-looking 1.
+local function desktop_of_workspace(parameters)
+  local workspace_id = parameters.workspace_id
+  if workspace_id < 1 then return nil end
+  if state.bands[band_index_of_workspace({ workspace_id = workspace_id })] == nil then return nil end
+  local desktop = ((workspace_id - 1) % state.desktop_count) + 1
+  if desktop > state.desktop_count then return nil end
+  return desktop
+end
+
+-- ---------------------------------------------------------------------------
+-- the public surface
+-- ---------------------------------------------------------------------------
+
+--- The desktop currently in front of you, or nil if you are on a special
+--- workspace.
+function peach.current_desktop()
+  return desktop_of_workspace({ workspace_id = hl.get_active_workspace().id })
+end
+
+--- Bring EVERY panel to `desktop`.
+---
+--- Backwards through the bands, so the bottom panel switches last: focus
+--- follows whichever half switched most recently. That is also why no
+--- "focus this monitor" dispatch is needed anywhere in this file — the
+--- workspace switch carries the focus with it, which is the behaviour that
+--- makes a single-dispatch SUPER+N feel broken and the thing this library
+--- turns to its advantage.
+function peach.focus_desktop(parameters)
+  for band_index = #state.bands, 1, -1 do
+    hl.dispatch(hl.dsp.focus({ workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })) }))
+  end
+end
+
+--- Step the desktop by `step`, wrapping at both ends. Lua's `%` is
+--- non-negative for a positive divisor, so stepping backwards off desktop 1
+--- needs no special case.
+function peach.step_desktop(parameters)
+  local current = peach.current_desktop()
+  if current == nil then return end
+  peach.focus_desktop({ desktop = ((current - 1 + parameters.step) % state.desktop_count) + 1 })
+end
+
+--- Return to the desktop you were on before this one. Hyprland remembers the
+--- last WORKSPACE; the desktop that workspace belonged to is the pair to
+--- return to.
+function peach.focus_former_desktop()
+  local last = hl.get_last_workspace()
+  if last == nil then return end
+  local desktop = desktop_of_workspace({ workspace_id = last.id })
+  if desktop ~= nil then peach.focus_desktop({ desktop = desktop }) end
+end
+
+--- Focus a window and bring every panel to the desktop it lives on.
+---
+--- The desktop is read from the WINDOW rather than from the active workspace,
+--- so this is correct for a window on any panel seen from any starting desktop.
+--- This is the entry point a status bar or a window switcher wants: the obvious
+--- call, `focus({ window })`, follows the window onto its own monitor and says
+--- nothing about the others, which splits the panels apart.
+---
+--- `parameters.window` is anything `hl.get_window` accepts, including the
+--- `"address:0x…"` string a bar has to hand.
+function peach.focus_window_with_its_desktop(parameters)
+  local window = hl.get_window(parameters.window)
+  if window == nil or window.workspace == nil then return end
+  local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
+  if desktop ~= nil then peach.focus_desktop({ desktop = desktop }) end
+  hl.dispatch(hl.dsp.focus({ window = window }))
+end
+
+--- Send the focused window to `desktop`, keeping it on its own panel.
+---
+--- The target band is read from the WINDOW, so a window on the top panel moves
+--- to the top panel's copy of that desktop. The window changes desktop; it
+--- never changes monitor.
+---
+--- `follow = false` on the move and then following by hand is load-bearing: the
+--- move dispatcher's own follow switches the window's monitor and only that one,
+--- which is exactly the split this library exists to prevent. The option is
+--- spelled `follow`, not `silent` — Hyprland derives silence from it — and
+--- because an unknown key is silently absent rather than an error, a
+--- misspelling here fails OPEN into the loud behaviour.
+---
+--- The window is named EXPLICITLY in the move because `focus_desktop` runs
+--- afterwards and moves focus: "the active window" is a different window by the
+--- end of this function.
+function peach.send_active_window_to_desktop(parameters)
+  local window = hl.get_active_window()
+  if window == nil or window.workspace == nil then return end
+  local band_index = band_index_of_workspace({ workspace_id = window.workspace.id })
+  if state.bands[band_index] == nil then return end
+  hl.dispatch(hl.dsp.window.move({
+    window = window,
+    workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })),
+    follow = false,
+  }))
+  if parameters.follow then
+    peach.focus_desktop({ desktop = parameters.desktop })
+    hl.dispatch(hl.dsp.focus({ window = window }))
+  end
+end
+
+--- Fling the focused window to the desktop `step` places along, wrapping.
+---
+--- Stepped from the WINDOW's own desktop rather than from the active one, so
+--- it stays correct for a window on the panel you are not looking at.
+function peach.send_active_window_to_relative_desktop(parameters)
+  local window = hl.get_active_window()
+  if window == nil or window.workspace == nil then return end
+  local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
+  if desktop == nil then return end
+  peach.send_active_window_to_desktop({
+    desktop = ((desktop - 1 + parameters.step) % state.desktop_count) + 1,
+    follow = parameters.follow,
+  })
+end
+
+--- Throw the focused window at the panel `step` positions away (+1 is the next
+--- band up), keeping the desktop it is already on.
+---
+--- Hyprland has no binding for this out of the box: `moveworkspacetomonitor`
+--- moves an entire workspace between monitors, which in this model would tear a
+--- desktop in half. This moves one window across and leaves both desktops
+--- intact. Panels do not wrap — there is no panel above the top one, and
+--- silently sending a window to the bottom of the stack would be a surprise.
+function peach.send_active_window_to_panel(parameters)
+  local window = hl.get_active_window()
+  if window == nil or window.workspace == nil then return end
+  local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
+  if desktop == nil then return end
+  local target_band_index = band_index_of_workspace({ workspace_id = window.workspace.id }) + parameters.step
+  if state.bands[target_band_index] == nil then
+    announce({ text = "no panel that way" })
+    return
+  end
+  hl.dispatch(hl.dsp.window.move({
+    window = window,
+    workspace = tostring(workspace_id_for({ band_index = target_band_index, desktop = desktop })),
+    follow = false,
+  }))
+  -- The desktop does not change, so there is no pair to re-synchronise; the
+  -- only question is whether your eyes follow the window to the other panel.
+  if parameters.follow then hl.dispatch(hl.dsp.focus({ window = window })) end
+end
+
+--- Swap what the panels are showing on the current desktop.
+---
+--- `swap_monitors` is native to Hyprland now; hyprsplit shipped the idea first
+--- as a plugin dispatcher, and it belongs in the desktop model too — "these two
+--- windows are on the wrong screens" is a thought you have several times a day.
+--- Only meaningful with exactly two panels, which is the shape this is for.
+function peach.swap_panels()
+  if #state.bands ~= 2 then
+    announce({ text = "swap needs exactly two panels" })
+    return
+  end
+  hl.dispatch(hl.dsp.workspace.swap_monitors({ monitor1 = state.bands[1].monitor, monitor2 = state.bands[2].monitor }))
+end
+
+--- Sweep windows stranded outside every band onto the desktop in front of you.
+---
+--- Unplugging a monitor leaves its windows on workspaces no panel owns, and no
+--- binding in this file can reach them — they are simply gone. Taken from
+--- hyprsplit's `grab_rogue_windows`, which named a failure mode worth handling.
+function peach.gather_rogue_windows()
+  local destination = hl.get_active_workspace()
+  if destination == nil then return end
+  local gathered = 0
+  for _, window in ipairs(hl.get_windows()) do
+    local workspace = window.workspace
+    if workspace ~= nil and workspace.id > 0 and desktop_of_workspace({ workspace_id = workspace.id }) == nil then
+      hl.dispatch(hl.dsp.window.move({ window = window, workspace = tostring(destination.id), follow = false }))
+      gathered = gathered + 1
+    end
+  end
+  announce({ text = gathered == 0 and "no stranded windows" or ("gathered " .. gathered .. " stranded window(s)") })
+end
+
+--- A one-line description of the live pairing, for a bar or a `hyprctl eval`.
+--- Reports each panel's desktop and whether the panels agree, which is the one
+--- state this model cannot otherwise show: each bar draws its own panel's
+--- workspace, so nothing on screen says the panels have drifted apart.
+function peach.describe()
+  local descriptions = {}
+  local desktops = {}
+  for band_index, band in ipairs(state.bands) do
+    local monitor = hl.get_monitor(band.monitor)
+    local desktop = monitor ~= nil and monitor.active_workspace ~= nil
+      and desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
+      or nil
+    descriptions[#descriptions + 1] = "panel " .. band_index .. " → desktop " .. tostring(desktop)
+    desktops[tostring(desktop)] = true
+  end
+  local distinct = 0
+  for _ in pairs(desktops) do distinct = distinct + 1 end
+  return table.concat(descriptions, ", ") .. (distinct > 1 and "  [PANELS DISAGREE]" or "  [paired]")
+end
+
+-- ---------------------------------------------------------------------------
+-- setup
+-- ---------------------------------------------------------------------------
+
+local function refuse(parameters)
+  error("hyprpeach: " .. parameters.reason .. "\nsee README.md for a complete setup() call", 0)
+end
+
+--- Pin every desktop to every panel, permanently.
+---
+--- `persistent` is the load-bearing word. Without it Hyprland DESTROYS a
+--- workspace the moment it empties, and the monitor it was pinned to is
+--- forgotten with it — the next switch re-creates it on whichever panel happens
+--- to hold focus, so the mapping is not merely arbitrary, it is amnesiac. This
+--- is the single most important line in the library and it took measuring a
+--- misbehaving desk to find. hyprsplit calls the same thing
+--- `persistent_workspaces`.
+---
+--- `default` brings every panel up on desktop 1 at login.
+local function create_workspace_rules()
+  for _, band in ipairs(state.bands) do
+    for desktop = 1, state.desktop_count do
+      hl.workspace_rule({
+        workspace = tostring(band.workspace_band_start + desktop),
+        monitor = band.monitor,
+        default = desktop == 1,
+        persistent = true,
+      })
+    end
+  end
+end
+
+--- Unbind the stock single-dispatch bindings this library replaces.
+---
+--- The number row is bound BY KEYCODE (`code:10` is `1`, `code:19` is `0`) both
+--- here and by Hyprland's and Omarchy's defaults, because a keycode survives a
+--- keyboard-layout change. An unbind naming `SUPER + 1` matches nothing, leaves
+--- the default in place, and then BOTH bindings fire on one press.
+local function unbind_conflicting_defaults(parameters)
+  -- The number row is bound BY KEYCODE (`code:10` is `1`, `code:19` is `0`)
+  -- both here and by the stock configs, because a keycode survives a keyboard
+  -- layout change. An unbind naming `SUPER + 1` matches nothing, leaves the
+  -- default in place, and then BOTH bindings fire on one press.
+  -- The stock number row is TEN keys whatever `desktop_count` is. Clearing
+  -- only as many as there are desktops would leave the rest bound to flat
+  -- workspaces -- with eight desktops, SUPER+9 would still jump to a ninth
+  -- workspace on one panel and split the desk, and nothing would report it.
+  for keyIndex = 1, 10 do
+    local keycode = "code:" .. tostring(keyIndex + 9)
+    for _, modifier in ipairs(STOCK_NUMBER_ROW_MODIFIERS) do
+      hl.unbind(modifier .. " + " .. keycode)
+    end
+  end
+  -- Every one of these is a single dispatch in the stock config, so every one
+  -- of them splits the panels apart. `e+1` is the clearest: it walks to the
+  -- next workspace that EXISTS, which on a two-panel desk is usually the other
+  -- monitor, making the "next workspace" key a monitor hop in disguise.
+  for _, chord in ipairs(STOCK_WORKSPACE_CHORDS) do
+    hl.unbind(chord)
+  end
+  -- And whatever this config is about to take, so a hyprpeach binding replaces
+  -- the stock one rather than stacking on top of it -- Hyprland runs every
+  -- binding on a chord, in order, so two live bindings both fire. The three
+  -- modifier entries are prefixes rather than chords and are handled by the
+  -- number-row loop above.
+  for name, chord in pairs(parameters.keys) do
+    if chord and not name:find("_modifier$") then hl.unbind(chord) end
+  end
+end
+
+local function create_bindings(parameters)
+  local keys = parameters.keys
+
+  --- A chord set to `false` is simply not bound. Everything it would have done
+  --- stays reachable as a `peach.*` call, so trimming the keymap never removes
+  --- a capability -- only a shortcut to it.
+  local function bind(chord, action, description)
+    if not chord then return end
+    hl.bind(chord, action, { description = description })
+  end
+
+  local function on_number_row(modifier, keycode)
+    if not modifier then return false end
+    return modifier .. " + " .. keycode
+  end
+
+  for desktop = 1, state.desktop_count do
+    local keycode = "code:" .. tostring(desktop + 9)
+
+    bind(on_number_row(keys.focus_desktop_modifier, keycode), function()
+      peach.focus_desktop({ desktop = desktop })
+    end, "Focus desktop " .. desktop)
+
+    -- `focus_follows_fling` is read HERE, at press time, so a caller that flips
+    -- it at runtime gets the new behaviour without rebinding anything.
+    bind(on_number_row(keys.send_window_modifier, keycode), function()
+      peach.send_active_window_to_desktop({ desktop = desktop, follow = state.focus_follows_fling })
+    end, "Send window to desktop " .. desktop)
+
+    -- Off by default. The escape hatch for whichever way `focus_follows_fling`
+    -- is set: this one always takes you along.
+    bind(on_number_row(keys.send_window_and_follow_modifier, keycode), function()
+      peach.send_active_window_to_desktop({ desktop = desktop, follow = true })
+    end, "Send window to desktop " .. desktop .. " and follow it")
+  end
+
+  local function step(amount)
+    return function() peach.step_desktop({ step = amount }) end
+  end
+
+  local function fling(amount)
+    return function()
+      peach.send_active_window_to_relative_desktop({ step = amount, follow = state.focus_follows_fling })
+    end
+  end
+
+  -- SUPER moves you.
+  bind(keys.previous_desktop_arrow, step(-1), "Previous desktop")
+  bind(keys.next_desktop_arrow, step(1), "Next desktop")
+  bind(keys.next_desktop, step(1), "Next desktop")
+  bind(keys.previous_desktop, step(-1), "Previous desktop")
+  bind(keys.next_desktop_scroll, step(1), "Next desktop")
+  bind(keys.previous_desktop_scroll, step(-1), "Previous desktop")
+  bind(keys.former_desktop, function() peach.focus_former_desktop() end, "Former desktop")
+
+  -- SUPER + SHIFT moves the window. Left and right along the desktop strip,
+  -- up and down between the stacked panels.
+  bind(keys.send_window_to_previous_desktop, fling(-1), "Send window to the previous desktop")
+  bind(keys.send_window_to_next_desktop, fling(1), "Send window to the next desktop")
+  bind(keys.send_window_to_panel_above, function()
+    peach.send_active_window_to_panel({ step = 1, follow = state.focus_follows_fling })
+  end, "Send window to the panel above")
+  bind(keys.send_window_to_panel_below, function()
+    peach.send_active_window_to_panel({ step = -1, follow = state.focus_follows_fling })
+  end, "Send window to the panel below")
+
+  bind(keys.swap_panels, function() peach.swap_panels() end, "Swap what the panels show")
+  bind(keys.gather_rogue_windows, function() peach.gather_rogue_windows() end, "Gather stranded windows")
+end
+
+--- Configure hyprpeach and install its workspace rules and bindings.
+---
+--- ONLY `monitors_bottom_to_top` IS REQUIRED. It is a list of monitor
+--- selectors in PHYSICAL order, bottom first; the first entry takes the
+--- un-offset band, so on that monitor desktop N is simply workspace N.
+--- Everything else falls back to DEFAULTS above, which are tuned so that a
+--- stock Omarchy or Hyprland keymap keeps working.
+---
+--- PREFER `desc:` SELECTORS WITH THE SERIAL. hyprsplit and
+--- split-monitor-workspaces assign bands by connector name or monitor ID,
+--- which is fine until two monitors are the same model: connector names change
+--- when cables move ports, and then the desktops silently swap screens with
+--- nothing reporting it. `hyprctl monitors all` prints the full description;
+--- the trailing token is the serial.
+---
+--- `keys` is merged key-by-key, so overriding one chord keeps the rest.
+function peach.setup(options)
+  options = options or {}
+  if options.monitors_bottom_to_top == nil or #options.monitors_bottom_to_top < 1 then
+    refuse({ reason = "monitors_bottom_to_top is required: list your monitors in physical order, bottom first" })
+  end
+
+  local function chosen(key)
+    if options[key] ~= nil then return options[key] end
+    return DEFAULTS[key]
+  end
+
+  local desktop_count = chosen("desktop_count")
+
+  state.desktop_count = desktop_count
+  state.focus_follows_fling = chosen("focus_follows_fling")
+  state.notify = chosen("notify")
+  state.bands = {}
+  for index, monitor in ipairs(options.monitors_bottom_to_top) do
+    state.bands[index] = { monitor = monitor, workspace_band_start = (index - 1) * desktop_count }
+  end
+
+  -- Merged per key, not wholesale: overriding one chord should not silently
+  -- unbind the twelve you did not mention.
+  local keys = {}
+  for key, value in pairs(DEFAULTS.keys) do keys[key] = value end
+  for key, value in pairs(options.keys or {}) do
+    if DEFAULTS.keys[key] == nil then
+      refuse({ reason = "unknown key in setup().keys: " .. tostring(key) })
+    end
+    keys[key] = value
+  end
+
+  create_workspace_rules()
+  if chosen("unbind_conflicting_defaults") then unbind_conflicting_defaults({ keys = keys }) end
+  create_bindings({ keys = keys })
+
+  return peach
+end
+
+return peach
