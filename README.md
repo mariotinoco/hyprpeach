@@ -16,7 +16,7 @@
 
 <br>
 
-[**How it works**](#how-it-works) · [**Just install it**](#yeah-yeah-whatever--gimme-the-install-command-for-omarchy) · [**The keymap**](#the-keymap) · [**Install**](#install) · [**The bar strip**](#the-bar-strip) · [**API**](#api) · [**Prior art**](#prior-art)
+[**How it works**](#how-it-works) · [**Just install it**](#yeah-yeah-whatever--gimme-the-install-command-for-omarchy) · [**The keymap**](#the-keymap) · [**Install**](#install) · [**Upgrading**](#upgrading) · [**The bar strip**](#the-bar-strip) · [**API**](#api) · [**Prior art**](#prior-art)
 
 </div>
 
@@ -37,10 +37,10 @@ So stop trying. **A desktop is a _set_ of workspaces**, one pinned to each monit
 ## Yeah yeah whatever — gimme the install command for omarchy
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.0.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.0/install.sh | bash
 ```
 
-It reads your monitors out of `hyprctl`, writes the `setup()` call with them already filled in — bottom panel first, matched by EDID serial — clones the release, installs the bar strip, and reloads. Run it twice and nothing doubles up: the block it writes is fenced by markers and replaced, not appended.
+It reads your monitors out of `hyprctl`, writes the `setup()` call with them already filled in — bottom panel first, matched by EDID serial — clones the release, installs [the bar strip](#on-omarchy-one-more-line), puts `hyprpeach` on your `PATH`, and reloads. Run it twice and nothing doubles up: the block it writes is fenced by markers and replaced, not appended, which is also how [upgrading](#upgrading) works.
 
 <details>
 <summary>Piping a stranger's script into bash, you say</summary>
@@ -50,11 +50,11 @@ It reads your monitors out of `hyprctl`, writes the `setup()` call with them alr
 Fair. Read it first, then run it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.0.0/install.sh -o hyprpeach-install.sh
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.0/install.sh -o hyprpeach-install.sh
 less hyprpeach-install.sh && bash hyprpeach-install.sh
 ```
 
-Or skip it entirely — [Install](#install) is the same thing by hand, and it is not long. `HYPRPEACH_TAG=v1.1.0` picks a different release.
+Or skip it entirely — [Install](#install) is the library by hand, and it is not long. It leaves out what only the script does: the bar strip, the two displaced widgets, and the `hyprpeach` command. `HYPRPEACH_TAG=v1.1.0` picks a different release.
 
 </details>
 
@@ -75,7 +75,7 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v1.0.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v1.1.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
 **Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v1.1.0`.
@@ -143,13 +143,35 @@ Omarchy users also get [the bar strip](#the-bar-strip):
 ```bash
 omarchy plugin add https://github.com/mariotinoco/hyprpeach --enable
 omarchy plugin disable omarchy.workspaces
+omarchy plugin disable omarchy.menu
 ```
 
 Same repository, and Omarchy's plugin manager keeps its own copy of it. The strip is an extra, not a requirement.
 
+Both widgets are displaced rather than merely unused. `omarchy.workspaces` [cannot draw a hyprpeach desk](#the-bar-strip) at all. `omarchy.menu` is the widget ahead of the strip in the left section, and the strip is built to lead it — it reaches out to line its first tile up with the edge of a tiled window, which is only the right place to be when nothing sits in front of it. The menu is still one keypress away on `SUPER`, and `omarchy plugin enable omarchy.menu --section left` puts it back.
+
 <br>
 
 ---
+
+<br>
+
+## Upgrading
+
+```bash
+hyprpeach upgrade
+```
+
+It moves the clone to the newest release and re-runs *that release's* `install.sh`, so upgrading and installing are one path rather than two that drift apart. `hyprpeach version` says what is installed and what is available. Both are safe to run when you are already current.
+
+The command is laid down by `install.sh`, so you have it if you used the one-liner. A hand install upgrades by hand, the same way it installed:
+
+```bash
+git -C ~/.config/hypr/hyprpeach fetch --tags --force origin
+git -C ~/.config/hypr/hyprpeach checkout v1.1.0
+```
+
+`--force` is not optional there: without it a tag that ever moved upstream fails the whole fetch with *would clobber existing tag*, and the upgrade stops before it starts.
 
 <br>
 
@@ -164,6 +186,17 @@ Same repository, and Omarchy's plugin manager keeps its own copy of it. The stri
 | Sending a window to another screen | No binding — `moveworkspacetomonitor` moves the *whole workspace* | One window crosses; both desktops stay intact |
 | Unplugging a monitor | Its windows are stranded where no key can reach them | `gather_rogue_windows` sweeps them back |
 | Flinging a window away | No single-key way to cross screens at all | One key per direction, and your view lands with it |
+| A pinned window | Flips a monitor up or down, seemingly at random, as you change desktop | Stays on the panel you pinned it to |
+
+<br>
+
+### Why a pinned window used to wander
+
+Hyprland re-records a pinned window's workspace every time that window takes focus, as whatever the *focused* monitor is showing — true on a one-monitor desk, and wrong on every other, because the monitor holding the focus need not be the monitor the window is pinned to. It writes the field and nothing else, so the window does not move and the mismatch is invisible.
+
+A paired switch focuses every panel in turn, so it walks straight into it: the panel that switches first takes the focus, and a pinned window on *another* panel is picked up by the refocus that follows. The window is now recorded on a workspace belonging to a monitor it is not on — and the next time *that* panel changes desktop, Hyprland carries the window along with the workspace it is recorded on, dragging it physically onto the wrong screen. Which way it goes depends on which panel focused it last, which is why it looks random.
+
+hyprpeach puts every pinned window back on the workspace its own monitor is showing before each panel switch, so a pinned window is carried by its own panel — and again afterwards, so anything reading the compositor between switches reads the truth.
 
 <br>
 
@@ -240,6 +273,12 @@ panel 1 → desktop 5, panel 2 → desktop 5  [paired]
 Omarchy's own `omarchy.workspaces` widget cannot draw a hyprpeach desk. It filters to `id > 0 && id <= 10`, so a second monitor's band is invisible to it — every bar on every screen draws the *first* monitor's workspaces. And clicking one dispatches a single focus, splitting the pair the moment you touch the mouse.
 
 The replacement lives in `omarchy/` and is installed with [the one extra line](#on-omarchy-one-more-line) above.
+
+### On a desk with no window gaps
+
+Every measure in the strip is derived from Hyprland's `general:gaps_out`, because the point is to line the tiles up with the windows. Set it to `0` and there is no gutter left to line up with, so the strip falls back to the shell's own smallest spacing for the things you can see — the inset, the gap between tiles, the clearance from the screen edge — and stops reaching past the bar's own padding to meet a window edge that is not there. A desk that does use gaps is unaffected.
+
+<br>
 
 ### The strip
 

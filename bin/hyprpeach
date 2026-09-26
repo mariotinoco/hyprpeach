@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# hyprpeach — move this machine between hyprpeach releases.
+#
+# The library is a git clone pinned to a release tag, so an upgrade is a
+# checkout plus whatever the installer reconciles around it. This command
+# exists so that is one word rather than a trip to the repository to find out
+# what the newest tag is called.
+#
+# WHY EVERY LINE IS INSIDE A FUNCTION. Bash reads a script as it runs it,
+# keeping a byte offset into the file. `upgrade` checks out a newer release,
+# which rewrites THIS FILE underneath the running shell -- and a shell that
+# then reads the next command from a changed offset runs whatever now happens
+# to be there. Nothing executes until the final line, so by the time anything
+# can change on disk the whole script is already parsed and in memory.
+set -euo pipefail
+
+REPOSITORY="${HYPRPEACH_REPOSITORY:-https://github.com/mariotinoco/hyprpeach}"
+CLONE="${HYPRPEACH_CLONE:-$HOME/.config/hypr/hyprpeach}"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+# %b, not %s: these messages carry \n so a refusal can say what to do about
+# itself on its own line instead of printing a literal backslash-n.
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+# The release this machine is on, or empty when the clone sits between
+# releases. Names the tag rather than the commit: a tag is what the installer
+# pins and what a person can compare against a release page.
+installed_release() {
+  git -C "$CLONE" describe --tags --exact-match HEAD 2>/dev/null || true
+}
+
+# Bring local tags into agreement with the remote, and say whether it worked.
+#
+# EVERY QUESTION THIS COMMAND ANSWERS IS ASKED OF LOCAL TAGS, so they have to
+# be true first. A tag that was re-pointed upstream leaves a clone naming a
+# release it is not actually running, and reporting "up to date" against that
+# is the exact failure this command exists to catch -- a clone here sat on a
+# superseded v1.0.0 for a whole release with nothing noticing.
+#
+# --force for the same reason: without it a re-pointed tag fails the fetch with
+# "would clobber existing tag" and the stale name survives.
+refresh_releases() {
+  git -C "$CLONE" remote set-url origin "$REPOSITORY" 2>/dev/null || return 1
+  git -C "$CLONE" fetch --quiet --tags --force origin 2>/dev/null || return 1
+}
+
+# The newest release known, once `refresh_releases` has run.
+#
+# Sorted with `sort -V`, which orders 1.0.10 after 1.0.9 where a plain sort
+# puts it before. Filtered to exactly `vMAJOR.MINOR.PATCH` first, so a release
+# candidate or a moved marker tag cannot win the comparison and hand somebody
+# an upgrade they did not ask for.
+# `|| true` because a repository with no releases yet is a fact to report, not
+# a failure: grep matching nothing exits non-zero, pipefail promotes that to
+# the pipeline, and `set -e` would take the whole command down without ever
+# printing why. Empty output is the answer here.
+newest_release() {
+  git -C "$CLONE" tag --list 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true
+}
+
+require_clone() {
+  [[ -d $CLONE/.git ]] || die "no hyprpeach clone at $CLONE — install it first, see $REPOSITORY"
+}
+
+# A clone with edits in it is somebody's work, and a checkout would throw it
+# away without asking. Refusing costs them one command and never costs them
+# the edit.
+require_clean_clone() {
+  [[ -z $(git -C "$CLONE" status --porcelain) ]] || die \
+    "$CLONE has local changes, so upgrading would discard them.\n  Keep them:    git -C $CLONE stash\n  Or drop them: git -C $CLONE checkout ."
+}
+
+# Is `candidate` strictly newer than `installed`?
+#
+# Asked rather than assumed, because "the newest tag the remote has" and "newer
+# than what is here" are different questions the moment a checkout is ahead of
+# the remote -- which is the normal state of a release being prepared. Telling
+# somebody to upgrade INTO an older release because the strings differ is worse
+# than saying nothing.
+is_newer_than() {
+  local candidate=$1 installed=$2
+  [[ $candidate != "$installed" ]] || return 1
+  [[ -n $installed ]] || return 0
+  [[ $(printf '%s\n%s\n' "$candidate" "$installed" | sort -V | tail -n 1) == "$candidate" ]]
+}
+
+command_version() {
+  require_clone
+  local installed newest reachable=yes
+  refresh_releases || reachable=no
+  installed=$(installed_release)
+  newest=$(newest_release)
+  local head
+  head=$(git -C "$CLONE" rev-parse --short HEAD 2>/dev/null || echo "no commits")
+  say "installed: ${installed:-between releases ($head)}"
+  if [[ $reachable == no ]]; then
+    say "newest:    could not reach $REPOSITORY — reporting from local tags"
+  elif [[ -z $newest ]]; then
+    say "newest:    no releases found at $REPOSITORY"
+  elif is_newer_than "$newest" "$installed"; then
+    say "newest:    $newest — run 'hyprpeach upgrade'"
+  elif [[ $installed == "$newest" ]]; then
+    say "newest:    $newest — up to date"
+  else
+    say "newest:    $newest — this checkout is ahead of the remote"
+  fi
+}
+
+# Move to the newest release, then hand over to that release's own installer.
+#
+# The installer is the one place that knows how to reconcile everything around
+# the clone -- the setup() block, the bar strip, the reload -- and it is
+# already written to be safe to run twice. Upgrading by re-running it means the
+# upgrade path and the install path are the same path, so neither can rot while
+# the other is exercised.
+#
+# `exec` rather than a call: the installer being run is the one that was just
+# checked out, and a fresh process reads it fresh.
+command_upgrade() {
+  require_clone
+  require_clean_clone
+
+  say "fetching releases from $REPOSITORY"
+  refresh_releases || die "could not fetch from $REPOSITORY"
+
+  local installed newest
+  installed=$(installed_release)
+  newest=$(newest_release)
+  [[ -n $newest ]] || die "no release tags found at $REPOSITORY"
+
+  if ! is_newer_than "$newest" "$installed"; then
+    say "already on ${installed:-this checkout} — $newest is the newest release, nothing to do"
+    return 0
+  fi
+
+  say "upgrading ${installed:-an unreleased checkout} → $newest"
+  git -C "$CLONE" checkout --quiet --detach "$newest"
+
+  [[ -x $CLONE/install.sh ]] || die "$newest has no install.sh to run"
+  HYPRPEACH_TAG="$newest" HYPRPEACH_REPOSITORY="$REPOSITORY" exec "$CLONE/install.sh"
+}
+
+command_help() {
+  cat <<'USAGE'
+🍑 hyprpeach — paired desktops across your monitors
+
+  hyprpeach upgrade    move to the newest release and re-run its installer
+  hyprpeach version    what is installed, and what is available
+  hyprpeach help       this
+
+Environment:
+  HYPRPEACH_REPOSITORY  where to fetch from
+  HYPRPEACH_CLONE       where the library lives (default ~/.config/hypr/hyprpeach)
+USAGE
+}
+
+main() {
+  case "${1:-help}" in
+    upgrade) command_upgrade ;;
+    version) command_version ;;
+    help|-h|--help) command_help ;;
+    *) command_help; die "unknown command: $1" ;;
+  esac
+}
+
+main "$@"

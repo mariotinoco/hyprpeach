@@ -19,19 +19,30 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {} }
+  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0 }
   local active_window = parameters.active_window
   local active_workspace = parameters.active_workspace
 
   _G.hl = {
-    dispatch = function(descriptor) recorder.dispatched[#recorder.dispatched + 1] = descriptor end,
+    -- A move is APPLIED, not just recorded: a window that has been moved is on
+    -- the workspace it was moved to. Without that, a repair that runs twice and
+    -- corrects nothing the second time reads here as a repair that fires twice.
+    dispatch = function(descriptor)
+      recorder.dispatched[#recorder.dispatched + 1] = descriptor
+      if descriptor.kind == "move" and type(descriptor.options.window) == "table" then
+        descriptor.options.window.workspace = { id = tonumber(descriptor.options.workspace) }
+      end
+    end,
     bind = function(keys, action, options)
       recorder.bound[keys] = options and options.description or true
       recorder.actions[keys] = action
     end,
     unbind = function(keys) recorder.unbound[#recorder.unbound + 1] = keys end,
     workspace_rule = function(rule) recorder.rules[#recorder.rules + 1] = rule end,
-    get_active_window = function() return active_window end,
+    get_active_window = function()
+      recorder.active_window_reads = recorder.active_window_reads + 1
+      return active_window
+    end,
     get_active_workspace = function() return active_workspace end,
     get_last_workspace = function() return parameters.last_workspace end,
     get_windows = function() return parameters.windows or {} end,
@@ -309,6 +320,129 @@ do
   special_peach.step_desktop({ step = 1 })
   check({ label = "a special workspace dispatches nothing", got = #special_recorder.dispatched, want = 0 })
   check({ label = "and has no desktop", got = special_peach.current_desktop(), want = nil })
+end
+
+-- --------------------------------------------------------------------------
+print("\na pinned window is realigned onto the panel it is actually on")
+do
+  -- Hyprland re-records a pinned window's workspace as whatever the FOCUSED
+  -- monitor is showing every time the window takes focus, which on a
+  -- multi-panel desk is routinely another panel's workspace. It writes the
+  -- field and nothing else, so the window stays where it is and the mismatch
+  -- is invisible -- until the next switch of THAT panel carries the window
+  -- physically onto it. See `realign_pinned_windows` in init.lua.
+  local bottom_monitor = { id = 1, active_workspace = { id = 3 } }
+  local top_monitor    = { id = 0, active_workspace = { id = 13 } }
+
+  -- Pinned, sitting on the bottom panel, but recorded on the top panel's
+  -- desktop 3. One more switch and the top panel takes it away.
+  local stranded_pinned = { pinned = true, monitor = bottom_monitor, workspace = { id = 13 } }
+  local settled_pinned  = { pinned = true, monitor = top_monitor, workspace = { id = 13 } }
+  local ordinary_window = { pinned = false, monitor = top_monitor, workspace = { id = 3 } }
+
+  local peach, recorder = fresh_peach({
+    windows = { stranded_pinned, settled_pinned, ordinary_window },
+    active_workspace = { id = 3 },
+  })
+  peach.focus_desktop({ desktop = 3 })
+
+  local moves = {}
+  for _, descriptor in ipairs(recorder.dispatched) do
+    if descriptor.kind == "move" then moves[#moves + 1] = descriptor end
+  end
+  -- Once. The repair after the loop finds nothing left to correct, which is
+  -- the property that lets it be called from every entry point without
+  -- thinking about whether another one already ran.
+  check({ label = "the misrecorded pinned window is moved once", got = #moves, want = 1 })
+  check({ label = "  ...onto the workspace ITS OWN monitor shows", got = moves[1].options.workspace, want = "3" })
+  check({ label = "  ...and it is the misrecorded one", got = moves[1].options.window, want = stranded_pinned })
+  -- follow = false: this corrects a record, it is not a move anyone asked for.
+  check({ label = "  ...silently", got = moves[1].options.follow, want = false })
+  -- The pinned window already on the panel it is recorded on is not touched;
+  -- neither is the unpinned one, which Hyprland never misrecords.
+  check({ label = "the settled pinned window stays put", got = settled_pinned.workspace.id, want = 13 })
+  check({ label = "the unpinned window stays put", got = ordinary_window.workspace.id, want = 3 })
+
+  -- ORDER IS THE WHOLE FIX. The repair has to land BEFORE a panel dispatches,
+  -- because it is that dispatch which drags a misrecorded pinned window onto
+  -- the wrong monitor. Repairing only afterwards would tidy the record up one
+  -- switch too late, every time.
+  check({ label = "the repair runs BEFORE the first panel dispatch", got = recorder.dispatched[1].kind, want = "move" })
+  check({ label = "  ...then the top panel", got = recorder.dispatched[2].options.workspace, want = "13" })
+  check({ label = "  ...then the bottom panel, which keeps the focus", got = recorder.dispatched[3].options.workspace, want = "3" })
+  check({ label = "and nothing else is dispatched", got = #recorder.dispatched, want = 3 })
+
+  -- The repair is taken before EVERY dispatch, not once before the loop: the
+  -- misrecording is written by a focus change, and one can arrive from the
+  -- compositor's own pointer handling between one panel's dispatch and the
+  -- next. A window that goes stale mid-loop must still be caught.
+  local went_stale = { pinned = true, monitor = bottom_monitor, workspace = { id = 3 } }
+  local peach_two, second = fresh_peach({ windows = { went_stale }, active_workspace = { id = 3 } })
+  local recording_dispatch = _G.hl.dispatch
+  _G.hl.dispatch = function(descriptor)
+    -- Misrecord it the moment the TOP panel has switched, the way a stray focus
+    -- from the compositor's pointer handling would.
+    if #second.dispatched == 0 then went_stale.workspace = { id = 13 } end
+    recording_dispatch(descriptor)
+  end
+  peach_two.focus_desktop({ desktop = 3 })
+
+  -- It has to be corrected BEFORE the bottom panel dispatches. Correcting it
+  -- afterwards tidies the record but the panel has already taken the window.
+  check({ label = "top panel switches first", got = second.dispatched[1].options.workspace, want = "13" })
+  check({ label = "a window misrecorded mid-loop is caught BEFORE the next panel", got = second.dispatched[2].kind, want = "move" })
+  check({ label = "  ...back onto the workspace its own monitor shows", got = second.dispatched[2].options.workspace, want = "3" })
+  check({ label = "  ...and only then does the bottom panel switch", got = second.dispatched[3].options.workspace, want = "3" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nwindows already where they belong are left alone")
+do
+  local bottom_monitor = { id = 1, active_workspace = { id = 3 } }
+  local top_monitor    = { id = 0, active_workspace = { id = 13 } }
+  local peach, recorder = fresh_peach({
+    windows = {
+      { pinned = true,  monitor = bottom_monitor, workspace = { id = 3 } },
+      { pinned = true,  monitor = top_monitor,    workspace = { id = 13 } },
+      -- Not pinned, so Hyprland never misrecords it and it must not be swept
+      -- up: an unpinned window on another panel's workspace is a window the
+      -- user deliberately sent there.
+      { pinned = false, monitor = bottom_monitor, workspace = { id = 13 } },
+      -- A pinned window can be reported mid-teardown with neither half of the
+      -- pair; nil is not a workspace to move it to.
+      { pinned = true,  monitor = nil,            workspace = { id = 3 } },
+      { pinned = true,  monitor = bottom_monitor, workspace = nil },
+    },
+    active_workspace = { id = 3 },
+  })
+  peach.focus_desktop({ desktop = 3 })
+  check({ label = "nothing is moved", got = #recorder.dispatched, want = 2 })
+  check({ label = "  ...only the two panels are switched", got = recorder.dispatched[1].kind, want = "focus" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe active window is read once, never across the pinned-window repair")
+do
+  -- The repair can hand focus to whatever sits under a pinned window it moves,
+  -- so "the active window" is not necessarily the same window either side of
+  -- it. A second read would let the window whose desktop was measured and the
+  -- window actually moved come apart -- rarely, silently, and only when a
+  -- pinned window happens to hold the focus.
+  local monitor = { id = 1, active_workspace = { id = 3 } }
+  local active = { pinned = true, monitor = monitor, workspace = { id = 13 } }
+  local peach, recorder = fresh_peach({
+    active_window = active,
+    windows = { active },
+    active_workspace = { id = 3 },
+    focus_follows_fling = false,
+  })
+
+  peach.send_active_window_to_relative_desktop({ step = 1, follow = false })
+  check({ label = "stepping sideways reads the active window once", got = recorder.active_window_reads, want = 1 })
+
+  local _, direct = fresh_peach({ active_window = active, windows = { active }, active_workspace = { id = 3 } })
+  peach.send_active_window_to_desktop({ desktop = 4, follow = false })
+  check({ label = "and so does sending it to a numbered desktop", got = direct.active_window_reads, want = 1 })
 end
 
 -- --------------------------------------------------------------------------

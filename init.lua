@@ -171,6 +171,69 @@ local function desktop_of_workspace(parameters)
 end
 
 -- ---------------------------------------------------------------------------
+-- the pinned-window repair
+-- ---------------------------------------------------------------------------
+
+--- Put every pinned window back on the workspace its own monitor is showing.
+---
+--- WHAT GOES WRONG WITHOUT IT. Hyprland re-records a pinned window's workspace
+--- every time that window takes focus, as whatever the FOCUSED monitor happens
+--- to be showing:
+---
+---     if (pWindow->m_pinned)
+---         pWindow->m_workspace = m_focusMonitor->m_activeWorkspace;
+---     -- src/desktop/state/FocusState.cpp, Hyprland 0.56.2
+---
+--- True on a one-monitor desk and wrong on every other, because the monitor
+--- holding the focus need not be the monitor the window is pinned to. It is a
+--- bare field write: the window's monitor and its pixels are left alone, so
+--- nothing on screen changes and the mismatch is invisible when it happens.
+---
+--- A PAIRED SWITCH WALKS STRAIGHT INTO IT, because focusing every panel in
+--- turn is the whole idea of this library. The panel dispatched first takes
+--- the focus, and a pinned window on ANOTHER panel is then picked up by the
+--- refocus that follows: with `input:follow_mouse` Hyprland hit-tests under
+--- the cursor, and that hit test considers pinned windows from any workspace
+--- by design. The window ends up recorded on a workspace belonging to a
+--- monitor it is not on.
+---
+--- THE DAMAGE LANDS ON THE NEXT SWITCH. `CMonitor::changeWorkspace` carries
+--- pinned windows along with the workspace they are RECORDED on, so the other
+--- panel's switch drags the window physically onto itself. The window flips
+--- one monitor up or down, and which way depends on which panel focused it
+--- last -- which is why it looks random rather than wrong in one direction.
+---
+--- Realigning BEFORE a switch is the part that prevents the flip: a pinned
+--- window recorded where it actually is gets carried by its own panel, which
+--- is the behaviour that was wanted all along. Realigning AFTER one is what
+--- keeps every other reader honest -- a bar, `describe`, and this file's own
+--- `send_active_window_*`, which all read a window's panel off the workspace
+--- it is recorded on.
+---
+--- `window.monitor` is the half of the pair that can be trusted, because the
+--- faulty write touches only the workspace. `follow = false` keeps the repair
+--- silent: it corrects a record, it is not a move the user asked for.
+---
+--- CALLERS READ THE WINDOW THEY MEAN BEFORE CALLING THIS. Repairing a pinned
+--- window that currently holds focus hands the focus to whatever sits under
+--- it, so "the active window" is not necessarily the same window either side
+--- of this call. Read it once, first, and name it explicitly from then on.
+local function realign_pinned_windows()
+  for _, window in ipairs(hl.get_windows()) do
+    if window.pinned and window.monitor ~= nil and window.workspace ~= nil then
+      local workspace_its_monitor_shows = window.monitor.active_workspace
+      if workspace_its_monitor_shows ~= nil and workspace_its_monitor_shows.id ~= window.workspace.id then
+        hl.dispatch(hl.dsp.window.move({
+          window = window,
+          workspace = tostring(workspace_its_monitor_shows.id),
+          follow = false,
+        }))
+      end
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
 -- the public surface
 -- ---------------------------------------------------------------------------
 
@@ -188,10 +251,28 @@ end
 --- workspace switch carries the focus with it, which is the behaviour that
 --- makes a single-dispatch SUPER+N feel broken and the thing this library
 --- turns to its advantage.
+---
+--- The pinned-window repair runs before EVERY dispatch, not once before the
+--- loop, because the thing it repairs is written asynchronously. Hyprland
+--- misrecords a pinned window's workspace from a focus change, and a focus
+--- change can arrive from the compositor's own pointer handling between one
+--- panel's dispatch and the next -- so a repair taken only at the top of the
+--- loop can be stale by the time the second panel switches, and that panel
+--- then drags the window onto itself. Repairing before each dispatch closes
+--- all but a sub-millisecond window; measured over 272 switches it did not
+--- flip once, where the same desk flipped roughly one switch in ninety with
+--- the repair taken only once.
+---
+--- The repair after the loop is for everyone else: a bar, `describe`, and the
+--- `send_active_window_*` calls below all read a window's panel off the
+--- workspace it is recorded on, and would otherwise read a lie between
+--- switches. See `realign_pinned_windows`.
 function peach.focus_desktop(parameters)
   for band_index = #state.bands, 1, -1 do
+    realign_pinned_windows()
     hl.dispatch(hl.dsp.focus({ workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })) }))
   end
+  realign_pinned_windows()
 end
 
 --- Step the desktop by `step`, wrapping at both ends. Lua's `%` is
@@ -223,12 +304,38 @@ end
 ---
 --- `parameters.window` is anything `hl.get_window` accepts, including the
 --- `"address:0x…"` string a bar has to hand.
+---
+--- The window is read BEFORE the repair; see `realign_pinned_windows`.
 function peach.focus_window_with_its_desktop(parameters)
   local window = hl.get_window(parameters.window)
+  realign_pinned_windows()
   if window == nil or window.workspace == nil then return end
   local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
   if desktop ~= nil then peach.focus_desktop({ desktop = desktop }) end
   hl.dispatch(hl.dsp.focus({ window = window }))
+end
+
+--- The move both `send_active_window_*` entry points make, on a window named
+--- explicitly rather than re-read from the compositor.
+---
+--- It exists so that "the window whose desktop was measured" and "the window
+--- that gets moved" cannot become two different windows. Both callers read the
+--- active window once, before the pinned-window repair, and hand it here; a
+--- second `get_active_window` after that repair would be a read taken across
+--- something that can move focus.
+local function send_window_to_desktop(parameters)
+  local window = parameters.window
+  local band_index = band_index_of_workspace({ workspace_id = window.workspace.id })
+  if state.bands[band_index] == nil then return end
+  hl.dispatch(hl.dsp.window.move({
+    window = window,
+    workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })),
+    follow = false,
+  }))
+  if parameters.follow then
+    peach.focus_desktop({ desktop = parameters.desktop })
+    hl.dispatch(hl.dsp.focus({ window = window }))
+  end
 end
 
 --- Send the focused window to `desktop`, keeping it on its own panel.
@@ -247,32 +354,29 @@ end
 --- The window is named EXPLICITLY in the move because `focus_desktop` runs
 --- afterwards and moves focus: "the active window" is a different window by the
 --- end of this function.
+---
+--- The window is read BEFORE the repair; see `realign_pinned_windows`.
 function peach.send_active_window_to_desktop(parameters)
   local window = hl.get_active_window()
+  realign_pinned_windows()
   if window == nil or window.workspace == nil then return end
-  local band_index = band_index_of_workspace({ workspace_id = window.workspace.id })
-  if state.bands[band_index] == nil then return end
-  hl.dispatch(hl.dsp.window.move({
-    window = window,
-    workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })),
-    follow = false,
-  }))
-  if parameters.follow then
-    peach.focus_desktop({ desktop = parameters.desktop })
-    hl.dispatch(hl.dsp.focus({ window = window }))
-  end
+  send_window_to_desktop({ window = window, desktop = parameters.desktop, follow = parameters.follow })
 end
 
 --- Fling the focused window to the desktop `step` places along, wrapping.
 ---
 --- Stepped from the WINDOW's own desktop rather than from the active one, so
 --- it stays correct for a window on the panel you are not looking at.
+---
+--- The window is read BEFORE the repair; see `realign_pinned_windows`.
 function peach.send_active_window_to_relative_desktop(parameters)
   local window = hl.get_active_window()
+  realign_pinned_windows()
   if window == nil or window.workspace == nil then return end
   local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
   if desktop == nil then return end
-  peach.send_active_window_to_desktop({
+  send_window_to_desktop({
+    window = window,
     desktop = ((desktop - 1 + parameters.step) % state.desktop_count) + 1,
     follow = parameters.follow,
   })
@@ -286,8 +390,11 @@ end
 --- desktop in half. This moves one window across and leaves both desktops
 --- intact. Panels do not wrap — there is no panel above the top one, and
 --- silently sending a window to the bottom of the stack would be a surprise.
+---
+--- The window is read BEFORE the repair; see `realign_pinned_windows`.
 function peach.send_active_window_to_panel(parameters)
   local window = hl.get_active_window()
+  realign_pinned_windows()
   if window == nil or window.workspace == nil then return end
   local desktop = desktop_of_workspace({ workspace_id = window.workspace.id })
   if desktop == nil then return end
@@ -312,11 +419,16 @@ end
 --- as a plugin dispatcher, and it belongs in the desktop model too — "these two
 --- windows are on the wrong screens" is a thought you have several times a day.
 --- Only meaningful with exactly two panels, which is the shape this is for.
+---
+--- Pinned windows are realigned first because Hyprland hands a swapped
+--- workspace's pinned windows to the other panel by record rather than by
+--- position, so a stale record swaps the wrong window.
 function peach.swap_panels()
   if #state.bands ~= 2 then
     announce({ text = "swap needs exactly two panels" })
     return
   end
+  realign_pinned_windows()
   hl.dispatch(hl.dsp.workspace.swap_monitors({ monitor1 = state.bands[1].monitor, monitor2 = state.bands[2].monitor }))
 end
 

@@ -148,6 +148,24 @@ BarWidget {
   readonly property int windowGap: Style.gapsOut * 2
   readonly property int barEndPadding: Style.space(8)
 
+  // WHEN HYPRLAND DRAWS NO GAP AT ALL.
+  //
+  // Every measure below is derived from the window gap, because the whole point
+  // is to line the strip up with the windows. Set `general:gaps_out = 0` and
+  // there is no gutter left to line up with -- and because one number feeds all
+  // of them, they do not degrade one at a time, they collapse together. Tiles
+  // grow to the full thickness of the bar, the spacing between them goes to
+  // nothing so the three states run together into one block, and the leading
+  // margin turns negative and reaches back over whatever widget sits before the
+  // strip.
+  //
+  // So the measures that exist to be SEEN fall back to the shell's own smallest
+  // comfortable spacing, and the one that exists to ALIGN stops at zero rather
+  // than reaching past the bar's own padding into its neighbour. A desk that
+  // does use gaps is unaffected: there the window gap is already the larger
+  // number and the leading margin is already positive.
+  readonly property int visibleGap: root.windowGap > 0 ? root.windowGap : Style.space(4)
+
   // Hyprland's border width. A window's FRAME starts at the window gap, but its
   // border sits on top of that and the content starts inside it -- and the
   // inner edge is the one an eye reads as "the top of the window", because the
@@ -176,22 +194,26 @@ BarWidget {
 
   // Across the bar: the gutter is barSize + windowGap, less a windowGap each
   // side, which leaves exactly this.
-  readonly property int tileThickness: Math.max(1, root.barSize - root.windowGap)
+  readonly property int tileThickness: Math.max(1, root.barSize - root.visibleGap)
 
   // Along the bar: the first tile starts where a tiled window's CONTENT starts
   // -- the gap, plus the border drawn inside it. The bar pads its own ends
   // further in than that, so this is often negative: the strip reaches back out
   // past the bar's padding to meet the window.
-  readonly property int leadingGap: root.windowGap + root.windowBorder - root.barEndPadding
+  //
+  // Never negative: past the bar's own padding there is no window edge to meet,
+  // only the widget before the strip, and reaching into it is what put the
+  // strip under Omarchy's menu button on a gapless desk.
+  readonly property int leadingGap: Math.max(0, root.windowGap + root.windowBorder - root.barEndPadding)
   readonly property int trailingGap: root.barEndPadding
   // One window gap between tiles, the same measure as everything else here.
-  readonly property int tileSpacing: root.windowGap
+  readonly property int tileSpacing: root.visibleGap
 
   // Which side of the bar the screen edge is on. The tile sits a window gap
   // clear of that edge and flush with the bar's inner side.
   readonly property bool screenEdgeAtStart: root.barPosition === "left" || root.barPosition === "top"
-  readonly property int crossStart: root.screenEdgeAtStart ? root.windowGap : 0
-  readonly property int crossEnd: root.screenEdgeAtStart ? 0 : root.windowGap
+  readonly property int crossStart: root.screenEdgeAtStart ? root.visibleGap : 0
+  readonly property int crossEnd: root.screenEdgeAtStart ? 0 : root.visibleGap
 
   implicitWidth: root.vertical ? root.barSize : grid.implicitWidth + root.leadingGap + root.trailingGap
   implicitHeight: root.vertical ? grid.implicitHeight + root.leadingGap + root.trailingGap : root.barSize
