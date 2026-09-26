@@ -41,6 +41,22 @@ fetch by name, so a moved tag leaves a clone reporting itself correctly pinned w
 running code that exists nowhere. That has already happened here once, and nothing
 noticed for a whole release.
 
+**A release is not shipped until GitHub says so.** Pushing a tag does not create a
+Release — the Releases page keeps showing the last one somebody published by hand, so
+the project reads as abandoned at whatever version that was while four newer tags sit
+in the repository unmentioned. Finish every release:
+
+```bash
+git push --force-with-lease origin main
+git push origin vX.Y.Z
+gh release create vX.Y.Z --title "vX.Y.Z — <the subject line>" --notes "..."
+```
+
+The notes are the only part of this project most people will ever read. Say what
+changed for someone using it, not what changed in the source; no commit hashes, no
+file paths. `gh release list` against `git ls-remote --tags origin` is the check that
+they agree.
+
 ## Tests
 
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.

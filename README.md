@@ -37,7 +37,7 @@ So stop trying. **A desktop is a _set_ of workspaces**, one pinned to each monit
 ## Yeah yeah whatever — gimme the install command for omarchy
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.2.0/install.sh | bash
 ```
 
 It reads your monitors out of `hyprctl`, writes the `setup()` call with them already filled in — bottom panel first, matched by EDID serial — clones the release, installs [the bar strip](#on-omarchy-one-more-line), puts `hyprpeach` on your `PATH`, and reloads. Run it twice and nothing doubles up: the block it writes is fenced by markers and replaced, not appended, which is also how [upgrading](#upgrading) works.
@@ -50,11 +50,11 @@ It reads your monitors out of `hyprctl`, writes the `setup()` call with them alr
 Fair. Read it first, then run it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.2/install.sh -o hyprpeach-install.sh
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.2.0/install.sh -o hyprpeach-install.sh
 less hyprpeach-install.sh && bash hyprpeach-install.sh
 ```
 
-Or skip it entirely — [Install](#install) is the library by hand, and it is not long. It leaves out what only the script does: the bar strip, the two displaced widgets, and the `hyprpeach` command. `HYPRPEACH_TAG=v1.1.2` picks a different release.
+Or skip it entirely — [Install](#install) is the library by hand, and it is not long. It leaves out what only the script does: the bar strip, the two displaced widgets, and the `hyprpeach` command. `HYPRPEACH_TAG=v1.2.0` picks a different release.
 
 </details>
 
@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v1.1.2 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v1.2.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v1.1.2`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v1.2.0`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -117,6 +117,7 @@ require("hyprpeach").setup({
     send_window_to_next_desktop     = "SUPER + SHIFT + RIGHT",
     send_window_to_panel_above      = "SUPER + SHIFT + UP",
     send_window_to_panel_below      = "SUPER + SHIFT + DOWN",
+    toggle_held_panel               = "SUPER + Y",
 
     send_window_and_follow_modifier = false,  -- always follows, whatever the flag says
     next_desktop                    = false,
@@ -168,7 +169,7 @@ The command is laid down by `install.sh`, so you have it if you used the one-lin
 
 ```bash
 git -C ~/.config/hypr/hyprpeach fetch --tags --force origin
-git -C ~/.config/hypr/hyprpeach checkout v1.1.2
+git -C ~/.config/hypr/hyprpeach checkout v1.2.0
 ```
 
 `--force` is not optional there: without it a tag that ever moved upstream fails the whole fetch with *would clobber existing tag*, and the upgrade stops before it starts.
@@ -186,6 +187,7 @@ git -C ~/.config/hypr/hyprpeach checkout v1.1.2
 | Sending a window to another screen | No binding — `moveworkspacetomonitor` moves the *whole workspace* | One window crosses; both desktops stay intact |
 | Unplugging a monitor | Its windows are stranded where no key can reach them | `gather_rogue_windows` sweeps them back |
 | Flinging a window away | No single-key way to cross screens at all | One key per direction, and your view lands with it |
+| Keeping one screen still | Only per-window, and [not for tiled windows at all](#holding-a-panel) | `SUPER + Y` holds a whole panel where it is |
 | A pinned window | Flips a monitor up or down, seemingly at random, as you change desktop | Stays on the panel you pinned it to |
 
 <br>
@@ -200,9 +202,25 @@ hyprpeach puts every pinned window back on the workspace its own monitor is show
 
 <br>
 
+## Holding a panel
+
+`SUPER + Y` holds the panel **under your pointer** where it is. The rest of the desk keeps moving; that one screen stays on whatever it was showing, whichever desktop you switch to. Press it again to let go.
+
+It reads the pointer rather than the focus because the gesture is *that screen, the one I am looking at* — and focusing a panel in order to hold it would move the very thing you are trying to leave alone.
+
+**There is no way to do this with window pinning.** Hyprland refuses to pin a tiled window outright — `pin` is for floating windows, which is why Omarchy's `SUPER + O` floats a window before it pins it. A screen full of tiles cannot be pinned one window at a time, so holding belongs to whatever owns the panels, which is this.
+
+A hold lasts as long as the session and a Hyprland reload clears it. That is deliberate for a mode you can forget you are in: the worst case is that it lapses, not that a screen stays silently stuck.
+
+The bar strip draws a lock on a held panel, and `describe()` says which panels are held rather than reporting them as a split — a detector that fires every time you use a feature is one nobody reads.
+
+And when the desk turns, the big number on a held screen shows a padlock beside the desktop it is **keeping** rather than the one everything else went to. That is the reminder: the screen that did not move tells you why, and which key gives it back.
+
+<br>
+
 ## Bindings
 
-**hyprpeach adds four chords** — `SUPER + SHIFT + arrows`. Everything else on the keymap is a chord your compositor already binds, taken over so it means the same thing on every panel; a workspace binding hyprpeach *ignores* is a binding that splits your desk.
+**hyprpeach adds five chords** — `SUPER + SHIFT + arrows`, and `SUPER + Y` to [hold a panel](#holding-a-panel). Everything else on the keymap is a chord your compositor already binds, taken over so it means the same thing on every panel; a workspace binding hyprpeach *ignores* is a binding that splits your desk.
 
 ### What this displaces
 

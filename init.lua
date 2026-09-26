@@ -91,6 +91,11 @@ local DEFAULTS = {
     send_window_to_panel_above      = "SUPER + SHIFT + UP",
     send_window_to_panel_below      = "SUPER + SHIFT + DOWN",
 
+    -- Hold the panel under the pointer. Bound by default, unlike the rest of
+    -- the additions below, because a held panel is invisible in the keymap and
+    -- discoverable only if the key exists.
+    toggle_held_panel               = "SUPER + Y",
+
     -- Off. Real capabilities, still callable as `peach.*`; they simply do not
     -- earn a key when the rule above already covers the day.
     send_window_and_follow_modifier = false,
@@ -234,6 +239,81 @@ local function realign_pinned_windows()
 end
 
 -- ---------------------------------------------------------------------------
+-- held panels
+-- ---------------------------------------------------------------------------
+
+--- Where the held panels are written for anything outside Hyprland to read.
+---
+--- A held panel is state that lives in this file's memory, and the bar strip
+--- runs in a different process that cannot see it. That matters more here than
+--- it looks: a panel showing a different desktop from its neighbours is exactly
+--- what a BUG in this library looks like, so a hold nothing draws is
+--- indistinguishable from the thing `describe` exists to catch.
+---
+--- A flag file watched for changes is Omarchy's own idiom for this -- its shell
+--- already reads `window-no-gaps` that way -- so this is that pattern rather
+--- than a new one. Under XDG_RUNTIME_DIR because a hold is not a preference: it
+--- should last as long as the session and no longer. `setup` rewrites it, so a
+--- Hyprland reload clears the file at the same moment it clears the memory and
+--- the two cannot drift apart.
+local HELD_PANELS_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/hyprpeach-held-panels"
+
+--- One held panel per line: the monitor's name, a space, and the desktop it is
+--- holding.
+---
+--- THE DESKTOP IS PUBLISHED TOO, and that is not redundant. The bar draws its
+--- highlight from Quickshell's idea of the workspace, which is reliable for the
+--- focused monitor and measurably not for the others -- with the desk on 8 and
+--- a panel held on 1, Quickshell reported that panel's active workspace as 8.
+--- A held panel is precisely the case where the other monitor's reading is the
+--- one that matters, so the number comes from here, where it is known, instead
+--- of being asked for somewhere it is guessed.
+local function publish_held_panels()
+  local file = io.open(HELD_PANELS_PATH, "w")
+  if file == nil then return end
+  for _, band in ipairs(state.bands) do
+    if band.held then
+      local monitor = hl.get_monitor(band.monitor)
+      local desktop = monitor ~= nil and monitor.active_workspace ~= nil
+        and desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
+        or nil
+      if monitor ~= nil then file:write(monitor.name, " ", tostring(desktop or ""), "\n") end
+    end
+  end
+  file:close()
+end
+
+--- Which band a live monitor is, matched by id rather than by selector: the
+--- selector is what the config said, the id is what Hyprland ended up with.
+local function band_index_of_monitor(parameters)
+  for band_index, band in ipairs(state.bands) do
+    local monitor = hl.get_monitor(band.monitor)
+    if monitor ~= nil and monitor.id == parameters.monitor.id then return band_index end
+  end
+  return nil
+end
+
+--- The desktop the desk is on, read from the lowest panel that still moves.
+---
+--- With nothing held this is the bottom panel, which is the one that keeps the
+--- focus anyway, so it agrees with "the desktop in front of you". It only
+--- differs when the panel you are standing on is held -- and stepping relative
+--- to a panel that is not going to move is not what anybody means by "next
+--- desktop".
+local function moving_desktop()
+  for band_index = 1, #state.bands do
+    local band = state.bands[band_index]
+    if not band.held then
+      local monitor = hl.get_monitor(band.monitor)
+      if monitor ~= nil and monitor.active_workspace ~= nil then
+        return desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
+      end
+    end
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- the public surface
 -- ---------------------------------------------------------------------------
 
@@ -269,8 +349,14 @@ end
 --- switches. See `realign_pinned_windows`.
 function peach.focus_desktop(parameters)
   for band_index = #state.bands, 1, -1 do
-    realign_pinned_windows()
-    hl.dispatch(hl.dsp.focus({ workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })) }))
+    -- A held panel is simply not dispatched to. That is the whole mechanism:
+    -- this loop is the only thing that moves a panel, so declining to run it
+    -- for one band leaves that panel exactly where it is, whatever the rest of
+    -- the desk does.
+    if not state.bands[band_index].held then
+      realign_pinned_windows()
+      hl.dispatch(hl.dsp.focus({ workspace = tostring(workspace_id_for({ band_index = band_index, desktop = parameters.desktop })) }))
+    end
   end
   realign_pinned_windows()
 end
@@ -279,7 +365,7 @@ end
 --- non-negative for a positive divisor, so stepping backwards off desktop 1
 --- needs no special case.
 function peach.step_desktop(parameters)
-  local current = peach.current_desktop()
+  local current = moving_desktop() or peach.current_desktop()
   if current == nil then return end
   peach.focus_desktop({ desktop = ((current - 1 + parameters.step) % state.desktop_count) + 1 })
 end
@@ -432,6 +518,42 @@ function peach.swap_panels()
   hl.dispatch(hl.dsp.workspace.swap_monitors({ monitor1 = state.bands[1].monitor, monitor2 = state.bands[2].monitor }))
 end
 
+--- Hold the panel under the POINTER where it is, or let it go again.
+---
+--- A held panel stops answering `focus_desktop`, so the rest of the desk keeps
+--- moving and that one screen stays on whatever it was showing -- a reference,
+--- a log, a call -- no matter which desktop you switch to.
+---
+--- Read from the POINTER rather than from the focus, because the gesture is
+--- "that screen, the one I am looking at" and your hand is already there. It
+--- also means holding a panel does not require focusing it first, which would
+--- move the very thing you are trying to leave alone.
+---
+--- The hold is deliberately not persistent. It lives as long as the session and
+--- a Hyprland reload clears it, which is the right default for a mode you can
+--- forget you are in: the worst case is that it lapses, not that a panel stays
+--- silently stuck across a reboot.
+function peach.toggle_held_panel()
+  local monitor = hl.get_monitor_at_cursor()
+  if monitor == nil then return end
+  local band_index = band_index_of_monitor({ monitor = monitor })
+  if band_index == nil then
+    announce({ text = "that screen is not one of the panels" })
+    return
+  end
+
+  local band = state.bands[band_index]
+  band.held = not band.held
+  publish_held_panels()
+
+  local desktop = monitor.active_workspace ~= nil
+    and desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
+    or nil
+  announce({ text = band.held
+    and ("panel " .. band_index .. " held on desktop " .. tostring(desktop))
+    or ("panel " .. band_index .. " released") })
+end
+
 --- Sweep windows stranded outside every band onto the desktop in front of you.
 ---
 --- Unplugging a monitor leaves its windows on workspaces no panel owns, and no
@@ -458,17 +580,25 @@ end
 function peach.describe()
   local descriptions = {}
   local desktops = {}
+  local held = 0
   for band_index, band in ipairs(state.bands) do
     local monitor = hl.get_monitor(band.monitor)
     local desktop = monitor ~= nil and monitor.active_workspace ~= nil
       and desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
       or nil
     descriptions[#descriptions + 1] = "panel " .. band_index .. " → desktop " .. tostring(desktop)
-    desktops[tostring(desktop)] = true
+      .. (band.held and " (held)" or "")
+    -- A held panel is EXCLUDED from the agreement test rather than counted as a
+    -- disagreement. It is showing a different desktop on purpose, and a split
+    -- detector that fires every time somebody uses the feature is a detector
+    -- nobody reads by the end of the week.
+    if band.held then held = held + 1 else desktops[tostring(desktop)] = true end
   end
   local distinct = 0
   for _ in pairs(desktops) do distinct = distinct + 1 end
-  return table.concat(descriptions, ", ") .. (distinct > 1 and "  [PANELS DISAGREE]" or "  [paired]")
+  local verdict = distinct > 1 and "  [PANELS DISAGREE]" or "  [paired]"
+  if held > 0 then verdict = verdict .. "  " .. held .. " held" end
+  return table.concat(descriptions, ", ") .. verdict
 end
 
 -- ---------------------------------------------------------------------------
@@ -607,6 +737,7 @@ local function create_bindings(parameters)
     peach.send_active_window_to_panel({ step = -1, follow = state.focus_follows_fling })
   end, "Send window to the panel below")
 
+  bind(keys.toggle_held_panel, function() peach.toggle_held_panel() end, "Hold the panel under the pointer")
   bind(keys.swap_panels, function() peach.swap_panels() end, "Swap what the panels show")
   bind(keys.gather_rogue_windows, function() peach.gather_rogue_windows() end, "Gather stranded windows")
 end
@@ -645,7 +776,7 @@ function peach.setup(options)
   state.notify = chosen("notify")
   state.bands = {}
   for index, monitor in ipairs(options.monitors_bottom_to_top) do
-    state.bands[index] = { monitor = monitor, workspace_band_start = (index - 1) * desktop_count }
+    state.bands[index] = { monitor = monitor, workspace_band_start = (index - 1) * desktop_count, held = false }
   end
 
   -- Merged per key, not wholesale: overriding one chord should not silently
@@ -658,6 +789,11 @@ function peach.setup(options)
     end
     keys[key] = value
   end
+
+  -- Rewritten from nothing held, because that is what `state.bands` above now
+  -- says. A reload that cleared the memory and left a stale file behind would
+  -- have the bar drawing a lock on a panel that moves.
+  publish_held_panels()
 
   create_workspace_rules()
   if chosen("unbind_conflicting_defaults") then unbind_conflicting_defaults({ keys = keys }) end

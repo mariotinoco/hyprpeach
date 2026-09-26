@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
@@ -55,6 +56,51 @@ BarWidget {
   // readings made cells appear and vanish mid-switch.
   property int bandStride: 10
 
+  // WHETHER THIS PARTICULAR PANEL IS BEING HELD.
+  //
+  // `SUPER + Y` holds the panel under the pointer: it stops answering desktop
+  // switches and stays on whatever it was showing. That is the one state in
+  // this model that makes the panels disagree ON PURPOSE, which is also
+  // exactly what a bug in the library looks like -- so a hold that nothing
+  // draws is indistinguishable from the thing being broken.
+  //
+  // The state lives in Lua inside Hyprland and this is a different process, so
+  // the library publishes the held monitors to a file and this watches it.
+  // Omarchy's own shell reads `window-no-gaps` the same way; this is that
+  // idiom, not a new one.
+  readonly property string screenName: {
+    var window = root.QsWindow.window
+    return window && window.screen ? String(window.screen.name || "") : ""
+  }
+  property var heldPanels: ({})
+  readonly property bool held: root.screenName !== "" && root.heldPanels[root.screenName] !== undefined
+  readonly property int heldDesktop: root.held ? root.heldPanels[root.screenName] : -1
+
+  // "<monitor name> <desktop>" per line. The desktop is carried because a held
+  // panel is exactly where Quickshell's per-monitor workspace goes stale.
+  function parseHeldPanels(raw) {
+    var panels = ({})
+    var lines = String(raw || "").split("\n")
+    for (var index = 0; index < lines.length; index++) {
+      var line = lines[index].trim()
+      if (line === "") continue
+      var gap = line.lastIndexOf(" ")
+      var name = gap < 0 ? line : line.substring(0, gap)
+      var desktop = gap < 0 ? -1 : parseInt(line.substring(gap + 1), 10)
+      panels[name] = isNaN(desktop) ? -1 : desktop
+    }
+    return panels
+  }
+
+  FileView {
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-held-panels"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.heldPanels = root.parseHeldPanels(text())
+    onLoadFailed: root.heldPanels = ({})
+  }
+
   function refreshBandStride() {
     var perMonitor = ({})
     var values = Hyprland.workspaces.values
@@ -104,7 +150,23 @@ BarWidget {
     return counts
   }
 
+  // THIS BAR'S OWN MONITOR, not whichever workspace has the focus.
+  //
+  // Reading the focused workspace is right exactly while the panels agree, and
+  // they are built to — so the difference never showed. A held panel breaks it
+  // on purpose: with the pointer resting on a held screen the focus sits there
+  // too, and every other bar on the desk would light up the held panel's
+  // desktop instead of its own. Each bar answers for the screen it is drawn on.
+  // A held panel shows what it is holding; every other panel shows the desk.
+  //
+  // Reading the focused workspace is right exactly while the panels agree, and
+  // they are built to -- so the difference never showed. Holding breaks it on
+  // purpose, and the held number cannot be read back out of Quickshell:
+  // measured with the desk on 8 and this panel held on 1, Quickshell reported
+  // this monitor's active workspace as 8. So the library publishes the number
+  // it already knows, and this trusts that.
   function activeDesktop() {
+    if (root.held && root.heldDesktop >= 1) return root.heldDesktop
     if (!Hyprland.focusedWorkspace || Hyprland.focusedWorkspace.id < 1) return -1
     return ((Hyprland.focusedWorkspace.id - 1) % root.bandStride) + 1
   }
@@ -242,9 +304,53 @@ BarWidget {
     anchors.bottomMargin: root.vertical ? root.trailingGap : root.crossEnd
     anchors.leftMargin: root.vertical ? root.crossStart : root.leadingGap
     anchors.rightMargin: root.vertical ? root.crossEnd : root.trailingGap
-    columns: root.vertical ? 1 : Math.max(1, root.desktops.length)
+    // The lock takes a cell of its own when it is showing, so the strip visibly
+    // grows by one rather than the mark being tucked inside a tile where it
+    // would compete with the numeral.
+    columns: root.vertical ? 1 : Math.max(1, root.desktops.length + (root.held ? 1 : 0))
     columnSpacing: root.vertical ? 0 : root.tileSpacing
     rowSpacing: root.vertical ? root.tileSpacing : 0
+
+    // A padlock, drawn rather than set in a font: the strip has no icon font of
+    // its own, and a glyph that resolves on one desk and turns into a box on
+    // another is worse than no mark at all.
+    Item {
+      id: lock
+      visible: root.held
+      implicitWidth: root.tileThickness
+      implicitHeight: root.tileThickness
+
+      Item {
+        anchors.centerIn: parent
+        width: Math.round(root.tileThickness * 0.44)
+        height: Math.round(root.tileThickness * 0.48)
+
+        // Shackle: a ring with its bottom half clipped away.
+        Item {
+          anchors.top: parent.top
+          anchors.horizontalCenter: parent.horizontalCenter
+          width: Math.round(parent.width * 0.62)
+          height: Math.round(parent.height * 0.5)
+          clip: true
+          Rectangle {
+            width: parent.width
+            height: parent.height * 2
+            radius: width / 2
+            color: "transparent"
+            border.width: Math.max(1, Math.round(root.tileThickness * 0.09))
+            border.color: Util.alpha(root.ink, 0.82)
+          }
+        }
+
+        Rectangle {
+          anchors.bottom: parent.bottom
+          width: parent.width
+          height: Math.round(parent.height * 0.58)
+          radius: Math.max(1, Math.round(root.tileThickness * 0.1))
+          color: Util.alpha(root.ink, 0.82)
+        }
+      }
+    }
 
     Repeater {
       model: root.desktops

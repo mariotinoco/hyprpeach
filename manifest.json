@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "hyprpeach.desktops",
   "name": "Desktops",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "author": "hyprpeach",
-  "description": "Desktop indicators for hyprpeach \u2014 a per-panel bar widget, and a big number on screen when the desktop changes",
+  "description": "Multi-monitor desktop indicators for Hyprland. Every monitor's bar draws its own desktop, clicking one moves the whole desk together, and a big number on screen confirms the switch.",
   "kinds": [
     "bar-widget",
     "panel"
@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "Desktops",
-    "description": "Desktop indicators for hyprpeach \u2014 a per-panel bar widget, and a big number on screen when the desktop changes",
+    "description": "Multi-monitor desktop indicators for Hyprland. Every monitor's bar draws its own desktop, clicking one moves the whole desk together, and a big number on screen confirms the switch.",
     "category": "Compositor",
     "defaultSection": "left",
     "allowMultiple": false

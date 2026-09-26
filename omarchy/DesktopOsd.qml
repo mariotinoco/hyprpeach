@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
@@ -52,6 +53,42 @@ Item {
   Connections {
     target: Hyprland.workspaces
     function onValuesChanged() { root.refreshBandStride() }
+  }
+
+  // WHICH PANELS ARE BEING HELD, AND ON WHAT.
+  //
+  // A held panel does not move when the desk does, so on that screen the big
+  // number would otherwise announce a desktop it is not showing -- the single
+  // most confusing thing this overlay could do. It shows the number that is
+  // STAYING, with a padlock, which is also the reminder that `SUPER + Y` will
+  // let it go.
+  //
+  // Published by the library because this is a different process from the Lua
+  // that knows it; the desktop is carried with the name because Quickshell's
+  // per-monitor workspace is stale for anything but the focused screen.
+  property var heldPanels: ({})
+
+  function parseHeldPanels(raw) {
+    var panels = ({})
+    var lines = String(raw || "").split("\n")
+    for (var index = 0; index < lines.length; index++) {
+      var line = lines[index].trim()
+      if (line === "") continue
+      var gap = line.lastIndexOf(" ")
+      var name = gap < 0 ? line : line.substring(0, gap)
+      var desktop = gap < 0 ? -1 : parseInt(line.substring(gap + 1), 10)
+      panels[name] = isNaN(desktop) ? -1 : desktop
+    }
+    return panels
+  }
+
+  FileView {
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-held-panels"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.heldPanels = root.parseHeldPanels(text())
+    onLoadFailed: root.heldPanels = ({})
   }
 
   property int holdMilliseconds: 350
@@ -176,6 +213,15 @@ Item {
           (panel.screen ? panel.screen.height : 1080) * root.sizeFraction))
         readonly property int glyphBox: Math.round(panel.glyphSize * 1.6)
 
+        // This screen, not the focused one: holding is per panel, and the whole
+        // point is that this panel differs from the rest of the desk.
+        readonly property string screenName: panel.screen ? String(panel.screen.name || "") : ""
+        readonly property bool held: panel.screenName !== "" && root.heldPanels[panel.screenName] !== undefined
+        readonly property int heldDesktop: panel.held ? root.heldPanels[panel.screenName] : -1
+        // A held panel announces what it is KEEPING; every other panel announces
+        // where the desk just went.
+        readonly property int shownDesktop: (panel.held && panel.heldDesktop >= 1) ? panel.heldDesktop : root.desktop
+
         implicitWidth: panel.glyphBox
         implicitHeight: panel.glyphBox
         visible: true
@@ -191,7 +237,7 @@ Item {
         Text {
           id: numeral
           anchors.centerIn: parent
-          text: root.desktop > 0 ? (root.desktop === 10 ? "0" : String(root.desktop)) : ""
+          text: panel.shownDesktop > 0 ? (panel.shownDesktop === 10 ? "0" : String(panel.shownDesktop)) : ""
 
           color: Util.alpha(Color.foreground, root.fillOpacity)
           font.family: Style.font.family
@@ -212,6 +258,71 @@ Item {
           opacity: root.opened ? 1 : 0
           Behavior on opacity {
             NumberAnimation { duration: root.opened ? 0 : root.fadeMilliseconds; easing.type: Easing.OutCubic }
+          }
+        }
+
+        // The padlock, beside the number it is keeping.
+        //
+        // Drawn rather than set in a font, for the same reason the bar strip
+        // draws its own: there is no icon font here that is guaranteed to have
+        // one, and a glyph that resolves on one desk and turns into a box on
+        // another is worse than no mark at all.
+        //
+        // On a BACKING PLATE, because the numeral holds against any wallpaper
+        // by way of an outline and plain shapes have no such thing. The plate
+        // is the same background colour the numeral outlines itself with, so
+        // the pair reads as one object on a light desk, a dark one, or a busy
+        // photograph.
+        //
+        // Anchored to the numeral rather than laid out with it: an unheld panel
+        // must be pixel-for-pixel what it always was, and a Row would shift the
+        // number sideways the moment a lock appeared next to it.
+        Rectangle {
+          id: lockPlate
+          visible: panel.held
+          anchors.right: numeral.left
+          anchors.rightMargin: Math.round(panel.glyphSize * 0.16)
+          anchors.verticalCenter: numeral.verticalCenter
+
+          readonly property int mark: Math.round(panel.glyphSize * 0.34)
+          width: Math.round(mark * 1.5)
+          height: Math.round(mark * 1.5)
+          radius: Math.round(width * 0.28)
+          color: Util.alpha(Color.background, root.outlineOpacity)
+          opacity: numeral.opacity
+          Behavior on opacity {
+            NumberAnimation { duration: root.opened ? 0 : root.fadeMilliseconds; easing.type: Easing.OutCubic }
+          }
+
+          Item {
+            anchors.centerIn: parent
+            width: lockPlate.mark
+            height: Math.round(lockPlate.mark * 1.08)
+
+            // Shackle: a ring with its bottom half clipped away.
+            Item {
+              anchors.top: parent.top
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: Math.round(parent.width * 0.62)
+              height: Math.round(parent.height * 0.5)
+              clip: true
+              Rectangle {
+                width: parent.width
+                height: parent.height * 2
+                radius: width / 2
+                color: "transparent"
+                border.width: Math.max(2, Math.round(lockPlate.mark * 0.15))
+                border.color: Color.foreground
+              }
+            }
+
+            Rectangle {
+              anchors.bottom: parent.bottom
+              width: parent.width
+              height: Math.round(parent.height * 0.56)
+              radius: Math.max(2, Math.round(lockPlate.mark * 0.16))
+              color: Color.foreground
+            }
           }
         }
       }

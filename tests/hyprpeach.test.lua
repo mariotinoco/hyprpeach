@@ -19,7 +19,22 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0 }
+  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {} }
+
+  -- The held-panel state is published to a file for the bar strip to watch, so
+  -- writes are captured here rather than landing in the running session's
+  -- runtime directory -- a test suite that puts a lock on a real bar has done
+  -- something worse than fail. Reads fall through, because the README check
+  -- below opens real files.
+  local open_file = io.open
+  io.open = function(path, mode)
+    if mode ~= "w" then return open_file(path, mode) end
+    local parts = {}
+    return {
+      write = function(_, ...) for _, part in ipairs({ ... }) do parts[#parts + 1] = part end end,
+      close = function() recorder.written[path] = table.concat(parts) end,
+    }
+  end
   local active_window = parameters.active_window
   local active_workspace = parameters.active_workspace
 
@@ -48,6 +63,7 @@ local function stub_hyprland(parameters)
     get_windows = function() return parameters.windows or {} end,
     get_window = function(selector) return selector end,
     get_monitor = function(name) return (parameters.monitors or {})[name] end,
+    get_monitor_at_cursor = function() return parameters.monitor_at_cursor end,
     notification = { create = function(note) recorder.notifications[#recorder.notifications + 1] = note.text end },
     dsp = {
       focus = function(options) return { kind = "focus", options = options } end,
@@ -473,6 +489,97 @@ do
   monitors[TOP] = { active_workspace = { id = 17 } }
   local split_peach = fresh_peach({ monitors = monitors })
   check({ label = "a split is called out loudly", got = split_peach.describe():find("PANELS DISAGREE", 1, true) ~= nil, want = true })
+end
+
+-- --------------------------------------------------------------------------
+print("\na held panel stops answering, and the rest of the desk carries on")
+do
+  -- Holding is the one thing here that makes the panels disagree on PURPOSE,
+  -- so it has to be exactly as surgical as it claims: the held band is not
+  -- dispatched to, and every other band still is.
+  local bottom = { id = 1, name = "BOTTOM", active_workspace = { id = 3 } }
+  local top    = { id = 0, name = "TOP", active_workspace = { id = 13 } }
+  local monitors = { [BOTTOM] = bottom, [TOP] = top }
+
+  local peach, recorder = fresh_peach({ monitors = monitors, monitor_at_cursor = top, active_workspace = { id = 3 } })
+  peach.focus_desktop({ desktop = 4 })
+  check({ label = "with nothing held, both panels are dispatched", got = #recorder.dispatched, want = 2 })
+
+  peach.toggle_held_panel()
+  local baseline = #recorder.dispatched
+  peach.focus_desktop({ desktop = 5 })
+  local moved = {}
+  for index = baseline + 1, #recorder.dispatched do
+    if recorder.dispatched[index].kind == "focus" then moved[#moved + 1] = recorder.dispatched[index].options.workspace end
+  end
+  check({ label = "the held panel is not dispatched to", got = #moved, want = 1 })
+  check({ label = "  ...and the panel that moved is the other one", got = moved[1], want = "5" })
+
+  peach.toggle_held_panel()
+  baseline = #recorder.dispatched
+  peach.focus_desktop({ desktop = 6 })
+  local again = 0
+  for index = baseline + 1, #recorder.dispatched do
+    if recorder.dispatched[index].kind == "focus" then again = again + 1 end
+  end
+  check({ label = "releasing puts it back in the loop", got = again, want = 2 })
+end
+
+-- --------------------------------------------------------------------------
+print("\nwhat is held is published, because the bar cannot see Lua state")
+do
+  local bottom = { id = 1, name = "BOTTOM", active_workspace = { id = 3 } }
+  local top    = { id = 0, name = "TOP", active_workspace = { id = 13 } }
+  local peach, recorder = fresh_peach({
+    monitors = { [BOTTOM] = bottom, [TOP] = top }, monitor_at_cursor = top, active_workspace = { id = 3 },
+  })
+  local path
+  for written_path in pairs(recorder.written) do path = written_path end
+  check({ label = "setup publishes, so a reload cannot leave a stale lock drawn", got = path ~= nil, want = true })
+  check({ label = "  ...and publishes nothing held", got = recorder.written[path], want = "" })
+
+  peach.toggle_held_panel()
+  -- Name AND desktop: the bar knows its screen by name, and the desktop cannot
+  -- be read back out of Quickshell for a monitor that is not focused.
+  check({ label = "holding publishes the monitor name and the desktop it holds", got = recorder.written[path], want = "TOP 3\n" })
+
+  peach.toggle_held_panel()
+  check({ label = "releasing publishes empty again", got = recorder.written[path], want = "" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nholding is reported, not mistaken for a split")
+do
+  local bottom = { id = 1, name = "BOTTOM", active_workspace = { id = 3 } }
+  local top    = { id = 0, name = "TOP", active_workspace = { id = 17 } }
+  local monitors = { [BOTTOM] = bottom, [TOP] = top }
+  local peach = fresh_peach({ monitors = monitors, monitor_at_cursor = top, active_workspace = { id = 3 } })
+
+  check({ label = "an unexplained split is still called out", got = peach.describe():find("PANELS DISAGREE", 1, true) ~= nil, want = true })
+  peach.toggle_held_panel()
+  local held = peach.describe()
+  check({ label = "a held panel is not a disagreement", got = held:find("PANELS DISAGREE", 1, true) == nil, want = true })
+  check({ label = "  ...it is named as held", got = held:find("(held)", 1, true) ~= nil, want = true })
+  check({ label = "  ...and counted", got = held:find("1 held", 1, true) ~= nil, want = true })
+end
+
+-- --------------------------------------------------------------------------
+print("\nstepping ignores the panel that is not going to move")
+do
+  -- Standing on a held panel showing desktop 3 while the desk is on 5, "next
+  -- desktop" means 6, not 4.
+  local bottom = { id = 1, name = "BOTTOM", active_workspace = { id = 5 } }
+  local top    = { id = 0, name = "TOP", active_workspace = { id = 13 } }
+  local monitors = { [BOTTOM] = bottom, [TOP] = top }
+  local peach, recorder = fresh_peach({ monitors = monitors, monitor_at_cursor = top, active_workspace = { id = 13 } })
+  peach.toggle_held_panel()
+  local baseline = #recorder.dispatched
+  peach.step_desktop({ step = 1 })
+  local target
+  for index = baseline + 1, #recorder.dispatched do
+    if recorder.dispatched[index].kind == "focus" then target = recorder.dispatched[index].options.workspace end
+  end
+  check({ label = "stepping reads the desk, not the held panel", got = target, want = "6" })
 end
 
 -- --------------------------------------------------------------------------
