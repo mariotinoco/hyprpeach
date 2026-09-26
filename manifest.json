@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprpeach.desktops",
   "name": "Desktops",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "hyprpeach",
   "description": "Desktop indicators for hyprpeach \u2014 a per-panel bar widget, and a big number on screen when the desktop changes",
   "kinds": [

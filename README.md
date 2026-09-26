@@ -37,7 +37,7 @@ So stop trying. **A desktop is a _set_ of workspaces**, one pinned to each monit
 ## Yeah yeah whatever — gimme the install command for omarchy
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.1/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.2/install.sh | bash
 ```
 
 It reads your monitors out of `hyprctl`, writes the `setup()` call with them already filled in — bottom panel first, matched by EDID serial — clones the release, installs [the bar strip](#on-omarchy-one-more-line), puts `hyprpeach` on your `PATH`, and reloads. Run it twice and nothing doubles up: the block it writes is fenced by markers and replaced, not appended, which is also how [upgrading](#upgrading) works.
@@ -50,11 +50,11 @@ It reads your monitors out of `hyprctl`, writes the `setup()` call with them alr
 Fair. Read it first, then run it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.1/install.sh -o hyprpeach-install.sh
+curl -fsSL https://raw.githubusercontent.com/mariotinoco/hyprpeach/v1.1.2/install.sh -o hyprpeach-install.sh
 less hyprpeach-install.sh && bash hyprpeach-install.sh
 ```
 
-Or skip it entirely — [Install](#install) is the library by hand, and it is not long. It leaves out what only the script does: the bar strip, the two displaced widgets, and the `hyprpeach` command. `HYPRPEACH_TAG=v1.1.1` picks a different release.
+Or skip it entirely — [Install](#install) is the library by hand, and it is not long. It leaves out what only the script does: the bar strip, the two displaced widgets, and the `hyprpeach` command. `HYPRPEACH_TAG=v1.1.2` picks a different release.
 
 </details>
 
@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v1.1.1 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v1.1.2 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v1.1.1`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v1.1.2`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -168,7 +168,7 @@ The command is laid down by `install.sh`, so you have it if you used the one-lin
 
 ```bash
 git -C ~/.config/hypr/hyprpeach fetch --tags --force origin
-git -C ~/.config/hypr/hyprpeach checkout v1.1.1
+git -C ~/.config/hypr/hyprpeach checkout v1.1.2
 ```
 
 `--force` is not optional there: without it a tag that ever moved upstream fails the whole fetch with *would clobber existing tag*, and the upgrade stops before it starts.

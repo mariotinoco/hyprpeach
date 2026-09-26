@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPOSITORY="${HYPRPEACH_REPOSITORY:-https://github.com/mariotinoco/hyprpeach}"
-TAG="${HYPRPEACH_TAG:-v1.1.1}"
+TAG="${HYPRPEACH_TAG:-v1.1.2}"
 CLONE="${HYPRPEACH_CLONE:-$HOME/.config/hypr/hyprpeach}"
 ENTRY="${HYPRPEACH_ENTRY:-$HOME/.config/hypr/hyprland.lua}"
 BEGIN="-- >>> hyprpeach >>>"
@@ -86,9 +86,13 @@ fi
 
 if grep -qF -- "$BEGIN" "$ENTRY"; then
   say "replacing the existing hyprpeach block in hyprland.lua"
+  # The FIRST block is replaced and any others are dropped, so this converges on
+  # one however many are already there. Versions of this script before 1.1.0
+  # could not match their own marker and appended a fresh block on every run, so
+  # anybody who installed more than once has a pile of them.
   awk -v b="$BEGIN" -v e="$END" -v repl="$BLOCK" '
-    index($0,b){skip=1; print repl; next}
-    index($0,e){skip=0; next}
+    index($0,b){ if (!done) { print repl; done=1 } skip=1; next }
+    index($0,e){ skip=0; next }
     !skip' "$ENTRY" > "$ENTRY.hyprpeach.tmp"
   mv "$ENTRY.hyprpeach.tmp" "$ENTRY"
 else
@@ -103,7 +107,17 @@ if command -v omarchy >/dev/null; then
   # releases behind its library that way, and nothing reported it.
   if omarchy plugin list --json 2>/dev/null | jq -e '.[] | select(.id == "hyprpeach.desktops")' >/dev/null 2>&1; then
     say "updating the bar strip"
-    omarchy plugin update hyprpeach.desktops --yes >/dev/null 2>&1 || true
+    # `omarchy plugin update` is a `git merge --ff-only`, so it refuses a clone
+    # whose history no longer descends from the remote's -- which is every clone
+    # taken before a release was re-tagged onto rewritten history. It reports
+    # that and returns non-zero; swallowing it leaves the strip on the old
+    # widget for good, with the library updating around it. Reinstalling through
+    # omarchy's own commands is the recovery, and it needs no path of ours.
+    if ! omarchy plugin update hyprpeach.desktops --yes >/dev/null 2>&1; then
+      say "the bar strip could not fast-forward — reinstalling it"
+      omarchy plugin remove hyprpeach.desktops --yes >/dev/null 2>&1 || true
+      omarchy plugin add "$REPOSITORY" --yes >/dev/null 2>&1 || true
+    fi
   else
     say "installing the bar strip"
     omarchy plugin add "$REPOSITORY" --yes >/dev/null 2>&1 || true

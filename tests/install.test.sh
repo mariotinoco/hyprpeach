@@ -102,6 +102,25 @@ grep -q "the user own config" "$SANDBOX/hyprland.lua"
 check "  ...and the file is intact" "$?" "0"
 
 echo
+echo "a config left with several blocks by an older installer collapses to one"
+# Before 1.1.0 the marker grep could not match its own marker, so every run
+# appended another setup() block. An upgrade has to converge on one, not
+# faithfully rewrite all of them.
+{
+  echo "-- their own config"
+  for n in 1 2 3; do
+    printf '\n-- >>> hyprpeach >>>\nrequire("hyprpeach").setup({ stale = %s })\n-- <<< hyprpeach <<<\n' "$n"
+  done
+} > "$SANDBOX/hyprland.lua"
+check "three stale blocks to start" "$(blocks)" "3"
+install_at "$NEWEST"
+check "  ...collapse to one" "$(blocks)" "1"
+grep -q "their own config" "$SANDBOX/hyprland.lua"
+check "  ...and their own config survives" "$?" "0"
+grep -q "stale = " "$SANDBOX/hyprland.lua"
+check "  ...with no stale setup() left behind" "$?" "1"
+
+echo
 echo "a repository with no releases is reported, not fatal"
 # grep matching nothing exits non-zero, pipefail promotes it, and `set -e` used
 # to take the command down before it printed anything at all.
