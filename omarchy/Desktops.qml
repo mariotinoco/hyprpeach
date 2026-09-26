@@ -148,23 +148,23 @@ BarWidget {
   readonly property int windowGap: Style.gapsOut * 2
   readonly property int barEndPadding: Style.space(8)
 
-  // WHEN HYPRLAND DRAWS NO GAP AT ALL.
+  // HOW THE STRIP SITS INSIDE THE BAR IS THE BAR'S BUSINESS, NOT HYPRLAND'S.
   //
-  // Every measure below is derived from the window gap, because the whole point
-  // is to line the strip up with the windows. Set `general:gaps_out = 0` and
-  // there is no gutter left to line up with -- and because one number feeds all
-  // of them, they do not degrade one at a time, they collapse together. Tiles
-  // grow to the full thickness of the bar, the spacing between them goes to
-  // nothing so the three states run together into one block, and the leading
-  // margin turns negative and reaches back over whatever widget sits before the
-  // strip.
+  // These were all derived from `general:gaps_out`, on the reasoning that the
+  // strip should line up with the windows. Across the bar that reasoning is
+  // simply wrong -- the tiles centre on the bar, like every other widget -- and
+  // it fails at both ends besides, because a window gap is a number a person
+  // can set to anything and a bar is 37 pixels wide. At `gaps_out = 0` the
+  // tiles filled the bar corner to corner and ran into each other; at 40 the
+  // arithmetic went negative and the current tile collapsed to a single dot.
   //
-  // So the measures that exist to be SEEN fall back to the shell's own smallest
-  // comfortable spacing, and the one that exists to ALIGN stops at zero rather
-  // than reaching past the bar's own padding into its neighbour. A desk that
-  // does use gaps is unaffected: there the window gap is already the larger
-  // number and the leading margin is already positive.
-  readonly property int visibleGap: root.windowGap > 0 ? root.windowGap : Style.space(4)
+  // Deriving them from the shell's own spacing scale closes both ends at once,
+  // and closes them by construction rather than by clamping: the bar and this
+  // scale both track the theme's font size, so they move together and there is
+  // no value of `gaps_out` that can make a tile vanish or overflow. The numbers
+  // below are the ones this desk already had at the default gap, so nothing
+  // moves on a stock setup.
+  readonly property int tileInset: Style.space(5)
 
   // Hyprland's border width. A window's FRAME starts at the window gap, but its
   // border sits on top of that and the content starts inside it -- and the
@@ -192,9 +192,8 @@ BarWidget {
     }
   }
 
-  // Across the bar: the gutter is barSize + windowGap, less a windowGap each
-  // side, which leaves exactly this.
-  readonly property int tileThickness: Math.max(1, root.barSize - root.visibleGap)
+  // Across the bar: the bar, less an equal inset on each side.
+  readonly property int tileThickness: Math.max(1, root.barSize - 2 * root.tileInset)
 
   // Along the bar: the first tile starts where a tiled window's CONTENT starts
   // -- the gap, plus the border drawn inside it. The bar pads its own ends
@@ -206,14 +205,30 @@ BarWidget {
   // strip under Omarchy's menu button on a gapless desk.
   readonly property int leadingGap: Math.max(0, root.windowGap + root.windowBorder - root.barEndPadding)
   readonly property int trailingGap: root.barEndPadding
-  // One window gap between tiles, the same measure as everything else here.
-  readonly property int tileSpacing: root.visibleGap
+  // Along the bar, between tiles. Also the shell's scale rather than the window
+  // gap: tying it to `gaps_out` stretched the strip down the whole panel on a
+  // desk with roomy gaps.
+  readonly property int tileSpacing: Style.space(10)
 
-  // Which side of the bar the screen edge is on. The tile sits a window gap
-  // clear of that edge and flush with the bar's inner side.
-  readonly property bool screenEdgeAtStart: root.barPosition === "left" || root.barPosition === "top"
-  readonly property int crossStart: root.screenEdgeAtStart ? root.visibleGap : 0
-  readonly property int crossEnd: root.screenEdgeAtStart ? 0 : root.visibleGap
+  // CENTRED IN THE BAR, which is not what this measured against at first.
+  //
+  // The original reasoning was that the bar is transparent, so what an eye sees
+  // is the GUTTER -- the bar plus the gap Hyprland leaves between it and the
+  // nearest window -- and a tile centred in that gutter is symmetric between
+  // the window and the screen edge. That is true, and it is still the wrong
+  // answer, because it is not what the eye is comparing against.
+  //
+  // Every other widget in the bar -- tray, clock, battery, all of them --
+  // centres on the BAR. Measured on a 37px bar: they land on x=7661.5 and the
+  // gutter-centred strip landed on 7656, so the desktop tiles sat five pixels
+  // off from every icon beneath them, down the whole length of the panel. A
+  // strip that disagrees with its neighbours reads as broken however
+  // defensible the arithmetic behind it is.
+  //
+  // Split the leftover evenly, and carry the odd pixel on the far side so the
+  // two never sum to more than the bar.
+  readonly property int crossStart: Math.max(0, Math.floor((root.barSize - root.tileThickness) / 2))
+  readonly property int crossEnd: Math.max(0, root.barSize - root.tileThickness - root.crossStart)
 
   implicitWidth: root.vertical ? root.barSize : grid.implicitWidth + root.leadingGap + root.trailingGap
   implicitHeight: root.vertical ? grid.implicitHeight + root.leadingGap + root.trailingGap : root.barSize

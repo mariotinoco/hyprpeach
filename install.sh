@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPOSITORY="${HYPRPEACH_REPOSITORY:-https://github.com/mariotinoco/hyprpeach}"
-TAG="${HYPRPEACH_TAG:-v1.1.0}"
+TAG="${HYPRPEACH_TAG:-v1.1.1}"
 CLONE="${HYPRPEACH_CLONE:-$HOME/.config/hypr/hyprpeach}"
 ENTRY="${HYPRPEACH_ENTRY:-$HOME/.config/hypr/hyprland.lua}"
 BEGIN="-- >>> hyprpeach >>>"
