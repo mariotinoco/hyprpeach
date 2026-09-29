@@ -304,53 +304,9 @@ BarWidget {
     anchors.bottomMargin: root.vertical ? root.trailingGap : root.crossEnd
     anchors.leftMargin: root.vertical ? root.crossStart : root.leadingGap
     anchors.rightMargin: root.vertical ? root.crossEnd : root.trailingGap
-    // The lock takes a cell of its own when it is showing, so the strip visibly
-    // grows by one rather than the mark being tucked inside a tile where it
-    // would compete with the numeral.
-    columns: root.vertical ? 1 : Math.max(1, root.desktops.length + (root.held ? 1 : 0))
+    columns: root.vertical ? 1 : Math.max(1, root.desktops.length)
     columnSpacing: root.vertical ? 0 : root.tileSpacing
     rowSpacing: root.vertical ? root.tileSpacing : 0
-
-    // A padlock, drawn rather than set in a font: the strip has no icon font of
-    // its own, and a glyph that resolves on one desk and turns into a box on
-    // another is worse than no mark at all.
-    Item {
-      id: lock
-      visible: root.held
-      implicitWidth: root.tileThickness
-      implicitHeight: root.tileThickness
-
-      Item {
-        anchors.centerIn: parent
-        width: Math.round(root.tileThickness * 0.44)
-        height: Math.round(root.tileThickness * 0.48)
-
-        // Shackle: a ring with its bottom half clipped away.
-        Item {
-          anchors.top: parent.top
-          anchors.horizontalCenter: parent.horizontalCenter
-          width: Math.round(parent.width * 0.62)
-          height: Math.round(parent.height * 0.5)
-          clip: true
-          Rectangle {
-            width: parent.width
-            height: parent.height * 2
-            radius: width / 2
-            color: "transparent"
-            border.width: Math.max(1, Math.round(root.tileThickness * 0.09))
-            border.color: Util.alpha(root.ink, 0.82)
-          }
-        }
-
-        Rectangle {
-          anchors.bottom: parent.bottom
-          width: parent.width
-          height: Math.round(parent.height * 0.58)
-          radius: Math.max(1, Math.round(root.tileThickness * 0.1))
-          color: Util.alpha(root.ink, 0.82)
-        }
-      }
-    }
 
     Repeater {
       model: root.desktops
@@ -380,9 +336,58 @@ BarWidget {
           // One ink, three alphas. Nothing, a hint, and all but solid.
           color: cell.current
             ? Util.alpha(root.ink, 0.92)
-            : (cell.occupied ? Util.alpha(root.ink, 0.14) : "transparent")
+            : (cell.occupied ? Util.alpha(root.ink, root.held ? 0.07 : 0.14) : "transparent")
 
           Behavior on color { ColorAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        }
+
+        // THE HELD TILE IS A PADLOCK. Not a number with a mark on it.
+        //
+        // A badge in the corner was legible as a shape and illegible as a
+        // meaning: at a tile's size there is room for one thing, and two things
+        // in a 27px square is neither. The tile that is held stops being a
+        // number and becomes a lock, which is also the truth -- that desktop is
+        // not somewhere this panel can go until you let it go.
+        //
+        // Drawn rather than set in a font, because there is no icon font here
+        // guaranteed to have one and a glyph that turns into a box on somebody
+        // else's theme is worse than no mark. Inked in the BAR's colour rather
+        // than the strip's, because it lies on the near-solid current tile,
+        // which is the one place the ink is inverted.
+        Item {
+          id: lockMark
+          visible: root.held && cell.modelData === root.heldDesktop
+          width: Math.round(root.tileThickness * 0.46)
+          height: Math.round(width * 1.08)
+          anchors.centerIn: parent
+          z: 2
+
+          readonly property color mark: cell.current ? root.barBackground : Util.alpha(root.ink, 0.92)
+
+          // Shackle: a ring with its bottom half clipped away.
+          Item {
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.round(parent.width * 0.6)
+            height: Math.round(parent.height * 0.5)
+            clip: true
+            Rectangle {
+              width: parent.width
+              height: parent.height * 2
+              radius: width / 2
+              color: "transparent"
+              border.width: Math.max(1, Math.round(lockMark.width * 0.2))
+              border.color: lockMark.mark
+            }
+          }
+
+          Rectangle {
+            anchors.bottom: parent.bottom
+            width: parent.width
+            height: Math.round(parent.height * 0.55)
+            radius: Math.max(1, Math.round(lockMark.width * 0.22))
+            color: lockMark.mark
+          }
         }
 
         WidgetButton {
@@ -394,13 +399,17 @@ BarWidget {
           // it -- the number row runs 1 to 0, not 1 to 10. It also keeps every
           // numeral one character wide, so it sits in a circle instead of
           // straining against one.
-          text: cell.modelData === 10 ? "0" : String(cell.modelData)
+          // The held tile carries the lock instead of its numeral.
+          text: lockMark.visible ? "" : (cell.modelData === 10 ? "0" : String(cell.modelData))
           // The invert: on the near-solid tile the numeral drops to the bar's
           // own background, so the pair is one ink with its roles swapped.
           // Empty and occupied are the same ink again, further down.
+          // EVERY OTHER DESKTOP GOES QUIET ON A HELD PANEL. They are not
+          // places this screen can go while it is held, and drawing them at
+          // full strength invites a click that will do nothing to it.
           foreground: cell.current
             ? root.barBackground
-            : Util.alpha(root.ink, cell.occupied ? 0.92 : 0.40)
+            : Util.alpha(root.ink, root.held ? 0.20 : (cell.occupied ? 0.92 : 0.40))
           useActiveColor: false
           opacity: 1
 

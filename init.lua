@@ -533,6 +533,12 @@ end
 --- a Hyprland reload clears it, which is the right default for a mode you can
 --- forget you are in: the worst case is that it lapses, not that a panel stays
 --- silently stuck across a reboot.
+---
+--- NO TOAST. The screen it happened to flashes a padlock closing or opening,
+--- which is the whole message and is already in the place you are looking. A
+--- notification on top of that is the same news twice, in the corner of a
+--- different monitor. The one announcement left is for the case where nothing
+--- flashes at all, because no panel was found to hold.
 function peach.toggle_held_panel()
   local monitor = hl.get_monitor_at_cursor()
   if monitor == nil then return end
@@ -545,13 +551,6 @@ function peach.toggle_held_panel()
   local band = state.bands[band_index]
   band.held = not band.held
   publish_held_panels()
-
-  local desktop = monitor.active_workspace ~= nil
-    and desktop_of_workspace({ workspace_id = monitor.active_workspace.id })
-    or nil
-  announce({ text = band.held
-    and ("panel " .. band_index .. " held on desktop " .. tostring(desktop))
-    or ("panel " .. band_index .. " released") })
 end
 
 --- Sweep windows stranded outside every band onto the desktop in front of you.

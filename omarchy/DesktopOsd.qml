@@ -82,13 +82,32 @@ Item {
     return panels
   }
 
+  // PRIMED BY THE FIRST READ, NOT BY THE FIRST CHANGE.
+  //
+  // Whether a panel is held has to arrive from disk, so on login it arrives as
+  // a CHANGE -- and a per-panel "ignore the first one" guard then swallows the
+  // first real toggle of any panel that happened not to be held at startup,
+  // which is every panel, the first time. Exactly the trap the desktop number
+  // fell into above, reached from the other direction.
+  //
+  // Assigning `heldPanels` re-evaluates the delegates' `held` synchronously, so
+  // setting this AFTER the assignment lets the initial load pass through
+  // unannounced and every later one ring.
+  property bool heldPanelsReady: false
+
   FileView {
     path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-held-panels"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.heldPanels = root.parseHeldPanels(text())
-    onLoadFailed: root.heldPanels = ({})
+    onLoaded: {
+      root.heldPanels = root.parseHeldPanels(text())
+      root.heldPanelsReady = true
+    }
+    onLoadFailed: {
+      root.heldPanels = ({})
+      root.heldPanelsReady = true
+    }
   }
 
   property int holdMilliseconds: 350
@@ -217,10 +236,31 @@ Item {
         // point is that this panel differs from the rest of the desk.
         readonly property string screenName: panel.screen ? String(panel.screen.name || "") : ""
         readonly property bool held: panel.screenName !== "" && root.heldPanels[panel.screenName] !== undefined
-        readonly property int heldDesktop: panel.held ? root.heldPanels[panel.screenName] : -1
-        // A held panel announces what it is KEEPING; every other panel announces
-        // where the desk just went.
-        readonly property int shownDesktop: (panel.held && panel.heldDesktop >= 1) ? panel.heldDesktop : root.desktop
+
+        // HOLDING AND RELEASING GET THEIR OWN FLASH, on the screen it happened
+        // to. Changing desktop announces itself on every screen that moved; the
+        // one thing that never announced itself was the act that stops a screen
+        // moving at all, which is also the one you most want confirmed, because
+        // it is silent and it is a mode you can forget you are in.
+        //
+        // Closed when it takes hold, open when it lets go, so the two presses
+        // of the same key do not look alike.
+        property bool lockOpened: false
+        property bool lockClosing: false
+
+        onHeldChanged: {
+            // Nothing flashes for the state the session started in.
+            if (!root.heldPanelsReady) return
+            panel.lockClosing = panel.held
+            panel.lockOpened = true
+            lockTimer.restart()
+        }
+
+        Timer {
+            id: lockTimer
+            interval: root.holdMilliseconds
+            onTriggered: panel.lockOpened = false
+        }
 
         implicitWidth: panel.glyphBox
         implicitHeight: panel.glyphBox
@@ -237,7 +277,7 @@ Item {
         Text {
           id: numeral
           anchors.centerIn: parent
-          text: panel.shownDesktop > 0 ? (panel.shownDesktop === 10 ? "0" : String(panel.shownDesktop)) : ""
+          text: root.desktop > 0 ? (root.desktop === 10 ? "0" : String(root.desktop)) : ""
 
           color: Util.alpha(Color.foreground, root.fillOpacity)
           font.family: Style.font.family
@@ -253,65 +293,62 @@ Item {
           // re-drawn from outlines every frame it is up.
           layer.enabled: true
 
+          // A HELD PANEL SAYS NOTHING. It did not move, so it has no news, and a
+          // number flashing on a screen that stayed put is this overlay
+          // contradicting itself. The padlock on the bar strip is the standing
+          // answer; a flash is for changes.
+          //
           // No fade in: on something this brief a ramp reads as lag. Straight
           // up at full size, and only the exit is animated.
-          opacity: root.opened ? 1 : 0
+          opacity: (root.opened && !panel.held) ? 1 : 0
           Behavior on opacity {
             NumberAnimation { duration: root.opened ? 0 : root.fadeMilliseconds; easing.type: Easing.OutCubic }
           }
         }
 
-        // The padlock, beside the number it is keeping.
+        // The padlock that says a screen has just been held, or just let go.
         //
-        // Drawn rather than set in a font, for the same reason the bar strip
-        // draws its own: there is no icon font here that is guaranteed to have
-        // one, and a glyph that resolves on one desk and turns into a box on
-        // another is worse than no mark at all.
-        //
-        // On a BACKING PLATE, because the numeral holds against any wallpaper
-        // by way of an outline and plain shapes have no such thing. The plate
-        // is the same background colour the numeral outlines itself with, so
-        // the pair reads as one object on a light desk, a dark one, or a busy
-        // photograph.
-        //
-        // Anchored to the numeral rather than laid out with it: an unheld panel
-        // must be pixel-for-pixel what it always was, and a Row would shift the
-        // number sideways the moment a lock appeared next to it.
+        // On a backing plate for the same reason the numeral carries an
+        // outline: drawn shapes have nothing to hold them against a light
+        // wallpaper, a dark one, or a photograph. Same size and place as the
+        // number, because it is the same kind of announcement.
         Rectangle {
-          id: lockPlate
-          visible: panel.held
-          anchors.right: numeral.left
-          anchors.rightMargin: Math.round(panel.glyphSize * 0.16)
-          anchors.verticalCenter: numeral.verticalCenter
+          id: lockFlash
+          visible: panel.lockOpened || opacity > 0
+          anchors.centerIn: parent
 
-          readonly property int mark: Math.round(panel.glyphSize * 0.34)
-          width: Math.round(mark * 1.5)
-          height: Math.round(mark * 1.5)
-          radius: Math.round(width * 0.28)
+          readonly property int mark: Math.round(panel.glyphSize * 0.52)
+          width: Math.round(mark * 1.45)
+          height: Math.round(mark * 1.45)
+          radius: Math.round(width * 0.26)
           color: Util.alpha(Color.background, root.outlineOpacity)
-          opacity: numeral.opacity
+
+          opacity: panel.lockOpened ? 1 : 0
           Behavior on opacity {
-            NumberAnimation { duration: root.opened ? 0 : root.fadeMilliseconds; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: panel.lockOpened ? 0 : root.fadeMilliseconds; easing.type: Easing.OutCubic }
           }
 
           Item {
             anchors.centerIn: parent
-            width: lockPlate.mark
-            height: Math.round(lockPlate.mark * 1.08)
+            width: lockFlash.mark
+            height: Math.round(lockFlash.mark * 1.06)
 
-            // Shackle: a ring with its bottom half clipped away.
+            // Shackle. Closed, it sits centred over the body; open, it is
+            // hinged off to one side and lifted clear, which is the difference
+            // an eye reads before it reads anything else.
             Item {
               anchors.top: parent.top
               anchors.horizontalCenter: parent.horizontalCenter
-              width: Math.round(parent.width * 0.62)
-              height: Math.round(parent.height * 0.5)
+              anchors.horizontalCenterOffset: panel.lockClosing ? 0 : Math.round(parent.width * 0.30)
+              width: Math.round(parent.width * 0.58)
+              height: Math.round(parent.height * 0.46)
               clip: true
               Rectangle {
                 width: parent.width
                 height: parent.height * 2
                 radius: width / 2
                 color: "transparent"
-                border.width: Math.max(2, Math.round(lockPlate.mark * 0.15))
+                border.width: Math.max(2, Math.round(lockFlash.mark * 0.14))
                 border.color: Color.foreground
               }
             }
@@ -319,8 +356,8 @@ Item {
             Rectangle {
               anchors.bottom: parent.bottom
               width: parent.width
-              height: Math.round(parent.height * 0.56)
-              radius: Math.max(2, Math.round(lockPlate.mark * 0.16))
+              height: Math.round(parent.height * 0.54)
+              radius: Math.max(2, Math.round(lockFlash.mark * 0.15))
               color: Color.foreground
             }
           }

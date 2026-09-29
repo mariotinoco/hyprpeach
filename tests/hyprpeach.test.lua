@@ -506,6 +506,9 @@ do
   check({ label = "with nothing held, both panels are dispatched", got = #recorder.dispatched, want = 2 })
 
   peach.toggle_held_panel()
+  -- No toast: the screen it happened to flashes a padlock, and a notification
+  -- on top of that is the same news twice on a different monitor.
+  check({ label = "holding says nothing in the corner", got = #recorder.notifications, want = 0 })
   local baseline = #recorder.dispatched
   peach.focus_desktop({ desktop = 5 })
   local moved = {}

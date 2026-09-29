@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPOSITORY="${HYPRPEACH_REPOSITORY:-https://github.com/mariotinoco/hyprpeach}"
-TAG="${HYPRPEACH_TAG:-v1.2.0}"
+TAG="${HYPRPEACH_TAG:-v1.3.0}"
 CLONE="${HYPRPEACH_CLONE:-$HOME/.config/hypr/hyprpeach}"
 ENTRY="${HYPRPEACH_ENTRY:-$HOME/.config/hypr/hyprland.lua}"
 BEGIN="-- >>> hyprpeach >>>"
@@ -132,6 +132,16 @@ if command -v omarchy >/dev/null; then
   # omarchy.menu --section left` puts it back.
   omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
   omarchy plugin disable omarchy.menu >/dev/null 2>&1 || true
+  # A VERTICAL BAR, because the strip is a column of ten cells and a desk this
+  # model is for is wide. On a horizontal bar those ten cells spend width that
+  # a 7680px panel has plenty of and a laptop does not, and the desktop strip
+  # ends up competing with the clock and the tray for the same axis.
+  #
+  # This is the one setting here that is a preference rather than a
+  # consequence, and it is set through Omarchy's own command rather than by
+  # editing shell.json, so `omarchy bar position top` -- or bottom, or right --
+  # puts it back and nothing here will argue.
+  omarchy bar position left >/dev/null 2>&1 || true
 else
   say "no omarchy command — skipping the bar strip, the library works without it"
 fi
