@@ -49,8 +49,18 @@ in the repository unmentioned. Finish every release:
 ```bash
 git push --force-with-lease origin main
 git push origin vX.Y.Z
+git ls-remote origin "refs/tags/vX.Y.Z^{}"   # must equal the commit you tagged
 gh release create vX.Y.Z --title "vX.Y.Z — <the subject line>" --notes "..."
 ```
+
+**Check the middle line landed before publishing.** `git push origin vX.Y.Z` is not
+idempotent: a tag the remote already has is silently left alone, exit 0, no output
+worth reading. So a tag pushed before a final amend keeps pointing at the commit
+before it, `main` moves on without it, and a Release published against that tag pins
+code nobody reviewed while looking entirely correct. That is what happened to v1.2.0
+— pushed, wrong, unnoticed until the tag was compared with `main` by hand. A tag that
+has already gone out and is wrong is not repointed; it is deleted and the next version
+carries the fix.
 
 The notes are the only part of this project most people will ever read. Say what
 changed for someone using it, not what changed in the source; no commit hashes, no
@@ -72,6 +82,18 @@ real thing would not do.
 
 A test that has never been seen to fail has not been shown to test anything. Break the
 fix on purpose, watch the test go red, put it back.
+
+**Neither suite reaches the bar strip or the overlay.** They are QML in another
+process, and every visual regression this project has shipped went out with both
+suites green: tiles filling the bar edge to edge on a gapless desk, the strip sitting
+five pixels off from every other icon in the panel, a padlock legible as a shape and
+illegible as a meaning. Each was found by taking a screenshot and looking at it, and
+none of them could have been found any other way.
+
+So anything that changes what the bar or the overlay draws is verified on a running
+desk before it is tagged — `grim`, crop, look. Measure against something: the other
+widgets' centres, the tile's own edges, the bar's reserved width. "It looks fine" has
+been wrong every time it mattered.
 
 ## Compositor bugs
 
