@@ -1,24 +1,14 @@
 {
   "schemaVersion": 1,
-  "id": "hyprpeach.desktops",
-  "name": "Desktops",
-  "version": "1.3.0",
+  "id": "hyprpeach",
+  "name": "hyprpeach",
+  "version": "2.0.0",
   "author": "hyprpeach",
-  "description": "Multi-monitor desktop indicators for Hyprland. Every monitor's bar draws its own desktop, clicking one moves the whole desk together, and a big number on screen confirms the switch.",
+  "description": "A collection of Omarchy plugins for Hyprland on more than one monitor. Add the ones you want: multi-monitor desktops that turn together across every screen, and a bar anchor for the dev servers you left running.",
   "kinds": [
-    "bar-widget",
-    "panel"
+    "service"
   ],
   "entryPoints": {
-    "barWidget": "omarchy/Desktops.qml",
-    "panel": "omarchy/DesktopOsd.qml"
-  },
-  "barWidget": {
-    "displayName": "Desktops",
-    "description": "Multi-monitor desktop indicators for Hyprland. Every monitor's bar draws its own desktop, clicking one moves the whole desk together, and a big number on screen confirms the switch.",
-    "category": "Compositor",
-    "defaultSection": "left",
-    "allowMultiple": false
-  },
-  "keepLoaded": true
+    "service": "Service.qml"
+  }
 }

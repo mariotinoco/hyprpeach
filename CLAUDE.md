@@ -1,8 +1,11 @@
 # Working in hyprpeach
 
-One Lua library, `init.lua`, plus its tests and an optional Omarchy bar strip. The
-machine-wide ADRs in `~/.claude/CLAUDE.md` govern how the code is shaped. This file
-covers only what is particular to shipping *this* repository.
+A collection of Omarchy plugins, installed as one: the root is an invisible `hyprpeach`
+service plus the `hyprpeach` command, and each plugin lives in `plugins/<name>/`, which
+`hyprpeach plugin add <name>` links into Omarchy's plugins folder. `init.lua`, the
+desktops library, stays at the root, where Hyprland and hand installs load it. The machine-wide
+ADRs in `~/.claude/CLAUDE.md` govern how the code is shaped. This file covers only
+what is particular to shipping *this* repository.
 
 ## Commits
 
@@ -31,12 +34,26 @@ No `Co-Authored-By` trailers, and no other AI attribution. The author is the aut
 
 ## Releases
 
-Semantic versioning against the `peach.*` surface and the keymap: a changed chord or
-signature is breaking, a new capability is minor, everything else is a patch. The
-version lives in `manifest.json`, `install.sh`'s default `TAG`, and the install
-commands in `README.md` — they move together or the release lies about itself.
+hyprpeach's own version is the collection's: removing or renaming a plugin, a
+plugin's major release, or changing how hyprpeach installs is major; adding a plugin
+or a plugin's minor release is minor; everything else is a patch. It lives in `manifest.json` and the
+version-pinned commands in `README.md` — they move together or the release lies about
+itself. The README's table of what a version promises is the contract; keep it true.
 
-Tag annotated, `vX.Y.Z`. **Never re-point a published tag.** Consumers pin by tag and
+**Only releases reach `main`.** Omarchy installs and updates to the newest commit on
+it, so a commit there is shipped to everyone the next time they update, released or
+not. Code lands on `main` together with its release; documentation may follow alone.
+
+**Each plugin under `plugins/` is versioned on its own**, in its own `manifest.json`,
+against its own surface — for desktops, the `peach.*` functions, `setup()` options and
+the keymap. It ships when hyprpeach ships, because Omarchy installs the
+whole repository at `main`; its version says what changed in *it*. A commit that
+releases one says so on the subject line — `feat(dev-ports-0.2.0): …` — and a commit that
+releases both carries hyprpeach's.
+
+Tag annotated: `vX.Y.Z` for hyprpeach, `<name>-vX.Y.Z` for a plugin. Only hyprpeach's
+tags match `^v`, which is what a 1.x `hyprpeach upgrade` searches for — a plugin tag
+shaped like a release would be offered to it as one. **Never re-point a published tag.** Consumers pin by tag and
 fetch by name, so a moved tag leaves a clone reporting itself correctly pinned while
 running code that exists nowhere. That has already happened here once, and nothing
 noticed for a whole release.
@@ -52,6 +69,9 @@ git push origin vX.Y.Z
 git ls-remote origin "refs/tags/vX.Y.Z^{}"   # must equal the commit you tagged
 gh release create vX.Y.Z --title "vX.Y.Z — <the subject line>" --notes "..."
 ```
+
+A plugin release is the same, published with `--latest=false`: GitHub marks one
+Release "Latest", and it should be hyprpeach's, which is what people install.
 
 **Check the middle line landed before publishing.** `git push origin vX.Y.Z` is not
 idempotent: a tag the remote already has is silently left alone, exit 0, no output
@@ -70,8 +90,17 @@ they agree.
 ## Tests
 
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.
-`bash tests/install.test.sh` — no machine, a sandboxed clone and entry file.
-Both green before a release.
+`bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.
+`bash tests/dev-ports.test.sh` — the dev-ports reader and its model, against a fake `ss`.
+All green before a release.
+
+**A test never reaches the machine it runs on.** One did: the 1.x installer test
+redirected its paths but ran the real `omarchy` under the real `HOME`, and replaced
+the tester's own bar plugin with a clone of the sandbox, whose origin was a directory
+deleted a second later. So a test sets `HOME` to its sandbox and puts fakes for
+anything that reaches a running process — `omarchy-shell`, `hyprctl` — first on
+`PATH`, and refuses to start unless they are what resolves. Scripts that only touch
+files under `HOME` run for real.
 
 They exist to pin down what is **invisible when wrong**. A paired switch firing in the
 wrong sequence looks exactly like one that is not, until a window lands on the wrong
@@ -83,9 +112,8 @@ real thing would not do.
 A test that has never been seen to fail has not been shown to test anything. Break the
 fix on purpose, watch the test go red, put it back.
 
-**Neither suite reaches the bar strip or the overlay.** They are QML in another
-process, and every visual regression this project has shipped went out with both
-suites green: tiles filling the bar edge to edge on a gapless desk, the strip sitting
+**No suite reaches the bar or the overlay.** They are QML in another process, and
+every visual regression this project has shipped went out with the suites green: tiles filling the bar edge to edge on a gapless desk, the strip sitting
 five pixels off from every other icon in the panel, a padlock legible as a shape and
 illegible as a meaning. Each was found by taking a screenshot and looking at it, and
 none of them could have been found any other way.

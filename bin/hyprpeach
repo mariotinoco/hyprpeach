@@ -1,163 +1,405 @@
 #!/usr/bin/env bash
-# hyprpeach — move this machine between hyprpeach releases.
+# hyprpeach — add and remove the plugins in the hyprpeach collection.
 #
-# The library is a git clone pinned to a release tag, so an upgrade is a
-# checkout plus whatever the installer reconciles around it. This command
-# exists so that is one word rather than a trip to the repository to find out
-# what the newest tag is called.
+# hyprpeach is ONE plugin in Omarchy's registry -- an invisible service, so
+# installing it puts nothing on the bar -- and this file lives in its clone:
+# `omarchy plugin add` made that clone, and `omarchy plugin update` keeps it
+# current. Each plugin under plugins/ is linked from Omarchy's plugins folder
+# into the clone rather than copied out of it, `hyprpeach` on PATH is a link to
+# this file, and the desktops library is loaded from the clone. So one Omarchy
+# update moves all of it, and nothing keeps a second copy that could fall behind.
 #
 # WHY EVERY LINE IS INSIDE A FUNCTION. Bash reads a script as it runs it,
-# keeping a byte offset into the file. `upgrade` checks out a newer release,
+# keeping a byte offset into the file. `upgrade` runs `omarchy plugin update`,
 # which rewrites THIS FILE underneath the running shell -- and a shell that
 # then reads the next command from a changed offset runs whatever now happens
 # to be there. Nothing executes until the final line, so by the time anything
 # can change on disk the whole script is already parsed and in memory.
 set -euo pipefail
 
-REPOSITORY="${HYPRPEACH_REPOSITORY:-https://github.com/mariotinoco/hyprpeach}"
-CLONE="${HYPRPEACH_CLONE:-$HOME/.config/hypr/hyprpeach}"
+REPOSITORY="https://github.com/mariotinoco/hyprpeach"
+PLUGIN_ID="hyprpeach"
+PLUGINS_DIRECTORY="$HOME/.config/omarchy/plugins"
+PLUGIN_DIRECTORY="$PLUGINS_DIRECTORY/$PLUGIN_ID"
+ENTRY="$HOME/.config/hypr/hyprland.lua"
+COMMAND_LINK="$HOME/.local/bin/hyprpeach"
+BEGIN="-- >>> hyprpeach >>>"
+END="-- <<< hyprpeach <<<"
+# The first comment line of the 1.x command, which install.sh COPIED onto PATH.
+# A file carrying it is ours to replace with the link; any other file named
+# hyprpeach is somebody else's and stays.
+FIRST_GENERATION_COMMAND_MARKER="# hyprpeach — move this machine between hyprpeach releases."
+# The 1.x library clone. Nothing 2.x installs reads it.
+FIRST_GENERATION_CLONE="$HOME/.config/hypr/hyprpeach"
+
+# This clone, found from this file rather than assumed: `hyprpeach` on PATH is
+# a link, and readlink -f follows it home.
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd -P)
 
 say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
 # %b, not %s: these messages carry \n so a refusal can say what to do about
 # itself on its own line instead of printing a literal backslash-n.
 die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
 
-# The release this machine is on, or empty when the clone sits between
-# releases. Names the tag rather than the commit: a tag is what the installer
-# pins and what a person can compare against a release page.
-installed_release() {
-  git -C "$CLONE" describe --tags --exact-match HEAD 2>/dev/null || true
+# EVERY COMMAND THAT CHANGES THE MACHINE RUNS FROM THE INSTALLED CLONE, and
+# only from there. The links it makes point back at wherever this file is, so a
+# command run from a checkout in ~/source would wire the desktop to a working
+# tree that `omarchy plugin update` never touches -- and the next update would
+# report success while changing nothing that runs.
+require_installed_clone() {
+  [[ $ROOT == "$(readlink -f "$PLUGIN_DIRECTORY" 2>/dev/null)" ]] || die \
+    "this is $ROOT/bin/hyprpeach, but hyprpeach is installed at $PLUGIN_DIRECTORY.\n  Install it:  omarchy plugin add $REPOSITORY --enable\n  Then run:    $PLUGIN_DIRECTORY/bin/hyprpeach plugin list"
 }
 
-# Bring local tags into agreement with the remote, and say whether it worked.
+require_command() {
+  local name=$1 remedy=$2
+  command -v "$name" >/dev/null || die "$name not found — $remedy"
+}
+
+manifest_field() {
+  local manifest=$1 field=$2
+  jq -r --arg field "$field" '.[$field] // ""' "$manifest"
+}
+
+# The plugins this clone carries, by folder name: the word you type after
+# `hyprpeach plugin add`.
+available_plugin_names() {
+  local manifest
+  for manifest in "$ROOT"/plugins/*/manifest.json; do
+    [[ -f $manifest ]] && basename "$(dirname "$manifest")"
+  done
+  return 0
+}
+
+require_plugin_name() {
+  local name=$1
+  [[ -n $name && -f $ROOT/plugins/$name/manifest.json ]] || die \
+    "${name:+no plugin named '$name' in this release. }Which plugin?\n  Available: $(available_plugin_names | tr '\n' ' ')"
+}
+
+# Whether a plugin is on this machine, and how.
 #
-# EVERY QUESTION THIS COMMAND ANSWERS IS ASKED OF LOCAL TAGS, so they have to
-# be true first. A tag that was re-pointed upstream leaves a clone naming a
-# release it is not actually running, and reporting "up to date" against that
-# is the exact failure this command exists to catch -- a clone here sat on a
-# superseded v1.0.0 for a whole release with nothing noticing.
-#
-# --force for the same reason: without it a re-pointed tag fails the fetch with
-# "would clobber existing tag" and the stale name survives.
-refresh_releases() {
-  git -C "$CLONE" remote set-url origin "$REPOSITORY" 2>/dev/null || return 1
-  git -C "$CLONE" fetch --quiet --tags --force origin 2>/dev/null || return 1
-}
-
-# The newest release known, once `refresh_releases` has run.
-#
-# Sorted with `sort -V`, which orders 1.0.10 after 1.0.9 where a plain sort
-# puts it before. Filtered to exactly `vMAJOR.MINOR.PATCH` first, so a release
-# candidate or a moved marker tag cannot win the comparison and hand somebody
-# an upgrade they did not ask for.
-# `|| true` because a repository with no releases yet is a fact to report, not
-# a failure: grep matching nothing exits non-zero, pipefail promotes that to
-# the pipeline, and `set -e` would take the whole command down without ever
-# printing why. Empty output is the answer here.
-newest_release() {
-  git -C "$CLONE" tag --list 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true
-}
-
-require_clone() {
-  [[ -d $CLONE/.git ]] || die "no hyprpeach clone at $CLONE — install it first, see $REPOSITORY"
-}
-
-# A clone with edits in it is somebody's work, and a checkout would throw it
-# away without asking. Refusing costs them one command and never costs them
-# the edit.
-require_clean_clone() {
-  [[ -z $(git -C "$CLONE" status --porcelain) ]] || die \
-    "$CLONE has local changes, so upgrading would discard them.\n  Keep them:    git -C $CLONE stash\n  Or drop them: git -C $CLONE checkout ."
-}
-
-# Is `candidate` strictly newer than `installed`?
-#
-# Asked rather than assumed, because "the newest tag the remote has" and "newer
-# than what is here" are different questions the moment a checkout is ahead of
-# the remote -- which is the normal state of a release being prepared. Telling
-# somebody to upgrade INTO an older release because the strings differ is worse
-# than saying nothing.
-is_newer_than() {
-  local candidate=$1 installed=$2
-  [[ $candidate != "$installed" ]] || return 1
-  [[ -n $installed ]] || return 0
-  [[ $(printf '%s\n%s\n' "$candidate" "$installed" | sort -V | tail -n 1) == "$candidate" ]]
-}
-
-command_version() {
-  require_clone
-  local installed newest reachable=yes
-  refresh_releases || reachable=no
-  installed=$(installed_release)
-  newest=$(newest_release)
-  local head
-  head=$(git -C "$CLONE" rev-parse --short HEAD 2>/dev/null || echo "no commits")
-  say "installed: ${installed:-between releases ($head)}"
-  if [[ $reachable == no ]]; then
-    say "newest:    could not reach $REPOSITORY — reporting from local tags"
-  elif [[ -z $newest ]]; then
-    say "newest:    no releases found at $REPOSITORY"
-  elif is_newer_than "$newest" "$installed"; then
-    say "newest:    $newest — run 'hyprpeach upgrade'"
-  elif [[ $installed == "$newest" ]]; then
-    say "newest:    $newest — up to date"
+# `added` only when Omarchy's folder for it is a link into THIS clone. A link
+# that resolves anywhere else is somebody's own arrangement -- a developer
+# pointing Omarchy at a checkout -- and a real folder is a copy that no update
+# will ever reach. A link that resolves nowhere is debris, usually of a clone
+# that has since moved.
+plugin_state() {
+  local name=$1 id=$2
+  local target="$PLUGINS_DIRECTORY/$id"
+  if [[ -L $target && ! -e $target ]]; then
+    echo "a broken link"
+  elif [[ -L $target && $(readlink -f "$target") == "$ROOT/plugins/$name" ]]; then
+    echo "added"
+  elif [[ -L $target ]]; then
+    echo "linked elsewhere"
+  elif [[ -e $target ]]; then
+    echo "a copy"
   else
-    say "newest:    $newest — this checkout is ahead of the remote"
+    echo "not added"
   fi
 }
 
-# Move to the newest release, then hand over to that release's own installer.
+# 🍑 a plugin you have, 🌱 one you could, ❔ one in a state `add` will explain.
+command_plugin_list() {
+  say "hyprpeach $(manifest_field "$ROOT/manifest.json" version) ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "not a git checkout"))"
+  local name manifest state mark
+  while IFS= read -r name; do
+    manifest="$ROOT/plugins/$name/manifest.json"
+    state=$(plugin_state "$name" "$(manifest_field "$manifest" id)")
+    case $state in
+      added) mark="🍑" ;;
+      "not added") mark="🌱" ;;
+      *) mark="❔" ;;
+    esac
+    printf '  %s %-12s %-8s %-16s %s\n' "$mark" "$name" "$(manifest_field "$manifest" version)" "$state" "$(manifest_field "$manifest" name)"
+  done < <(available_plugin_names)
+}
+
+# Link plugins/<name> into Omarchy's plugins folder, and enable it.
 #
-# The installer is the one place that knows how to reconcile everything around
-# the clone -- the setup() block, the bar strip, the reload -- and it is
-# already written to be safe to run twice. Upgrading by re-running it means the
-# upgrade path and the install path are the same path, so neither can rot while
-# the other is exercised.
+# A LINK, NOT A COPY, because the link is what makes the plugin follow the
+# collection. `omarchy plugin update` moves this clone; a copy would stay where
+# it was, and it is not a git checkout, so Omarchy's own update skips it. The
+# link has nothing to fall behind. Omarchy supports linked plugins as a
+# first-class case -- `omarchy plugin remove` unlinks one rather than deleting
+# through it, and its catalog scans with `find -L` -- while its validator
+# refuses links INSIDE a plugin, which is the other direction.
 #
-# `exec` rather than a call: the installer being run is the one that was just
-# checked out, and a fresh process reads it fresh.
-command_upgrade() {
-  require_clone
-  require_clean_clone
+# Relative, so it survives a home directory that moves.
+#
+# Adding one that is already added is not an error and not a no-op: the link
+# and the enable are left alone, and whatever the plugin writes OUTSIDE
+# Omarchy is written again. For desktops that is the monitors, so adding it
+# again is how a changed monitor layout is picked up.
+command_plugin_add() {
+  local name=$1
+  require_installed_clone
+  require_command omarchy "hyprpeach plugins are Omarchy plugins"
+  require_plugin_name "$name"
+  local source="$ROOT/plugins/$name"
+  local id
+  id=$(manifest_field "$source/manifest.json" id)
+  local target="$PLUGINS_DIRECTORY/$id"
 
-  say "fetching releases from $REPOSITORY"
-  refresh_releases || die "could not fetch from $REPOSITORY"
+  local state
+  state=$(plugin_state "$name" "$id")
+  case $state in
+    "linked elsewhere")
+      die "$target is a link to $(readlink "$target"), which is not this clone.\n  Remove it first: omarchy plugin remove $id"
+      ;;
+    "a broken link")
+      rm -f "$target"
+      ;;
+    "a copy")
+      # A folder copied out of an earlier clone, by hand or by an unreleased
+      # installer. Backed up rather than deleted, the way `omarchy plugin
+      # remove` treats a plugin folder that is not a git checkout -- and hidden,
+      # so the shell's scan never loads the backup as a second plugin with the
+      # same id.
+      local backup
+      backup="$PLUGINS_DIRECTORY/.$id.bak.$(date -u +%Y%m%d%H%M%S)"
+      mv "$target" "$backup"
+      say "moved the copy at $target to $backup"
+      ;;
+  esac
 
-  local installed newest
-  installed=$(installed_release)
-  newest=$(newest_release)
-  [[ -n $newest ]] || die "no release tags found at $REPOSITORY"
+  if [[ $state != added ]]; then
+    omarchy plugin validate "$source" >/dev/null || die \
+      "plugins/$name did not validate, so it was not added.\n  See why: omarchy plugin validate $source"
+    mkdir -p "$PLUGINS_DIRECTORY"
+    ln -s "$PLUGIN_ID/plugins/$name" "$target"
 
-  if ! is_newer_than "$newest" "$installed"; then
-    say "already on ${installed:-this checkout} — $newest is the newest release, nothing to do"
-    return 0
+    # The running shell only knows what it has scanned, and a link made here did
+    # not go through `omarchy plugin add` to trigger that scan. The scan is
+    # asynchronous, so enabling straight after it can name an id the shell has
+    # not read yet; `omarchy plugin add --enable` waits the same way.
+    omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+    local attempt
+    for (( attempt = 0; attempt < 40; attempt++ )); do
+      omarchy plugin list --json 2>/dev/null | jq -e --arg id "$id" 'any(.[]; .id == $id)' >/dev/null && break
+      sleep 0.05
+    done
+    # No placement: Omarchy puts it in the section its manifest names.
+    omarchy plugin enable "$id" >/dev/null || die "linked $id, but Omarchy would not enable it"
   fi
 
-  say "upgrading ${installed:-an unreleased checkout} → $newest"
-  git -C "$CLONE" checkout --quiet --detach "$newest"
+  [[ $name != desktops ]] || add_desktops_to_hyprland
+  # Here as well as in the service, because this is the first command a
+  # registry install runs -- by its full path, before anything is on PATH.
+  command_link_command
+  if [[ $state == added ]]; then say "$id was already added"; else say "added $id"; fi
+}
 
-  [[ -x $CLONE/install.sh ]] || die "$newest has no install.sh to run"
-  HYPRPEACH_TAG="$newest" HYPRPEACH_REPOSITORY="$REPOSITORY" exec "$CLONE/install.sh"
+# Through Omarchy's own remove, which disables the plugin and then UNLINKS it.
+# `rm -rf` on the link would be the same command one trailing slash away from
+# deleting the folder inside this clone that it points at.
+command_plugin_remove() {
+  local name=$1
+  require_installed_clone
+  require_command omarchy "hyprpeach plugins are Omarchy plugins"
+  require_plugin_name "$name"
+  local id
+  id=$(manifest_field "$ROOT/plugins/$name/manifest.json" id)
+  [[ $(plugin_state "$name" "$id") == added ]] || die "$id was not added by hyprpeach, so it is left alone"
+  [[ $name != desktops ]] || remove_desktops_from_hyprland
+  omarchy plugin remove "$id" --yes >/dev/null
+  say "removed $id"
+}
+
+# Put `hyprpeach` on PATH, as a link to this file.
+#
+# The service runs this every time the shell loads it, which is how a plugin
+# installed from Omarchy's registry -- where no installer of ours ever runs --
+# still ends up with the command. So it has to be silent when there is nothing
+# to do, and it must never take a file that is not ours.
+#
+# Replaces: nothing there, a link that no longer resolves, or the 1.x command,
+# which was a copy and cannot follow an update. Leaves: any other file, and any
+# working link, which is somebody's deliberate choice -- a developer pointing
+# the command at a checkout -- that a shell loading must not quietly undo.
+command_link_command() {
+  require_installed_clone
+  if [[ -L $COMMAND_LINK && -e $COMMAND_LINK ]]; then
+    return 0
+  elif [[ -f $COMMAND_LINK && ! -L $COMMAND_LINK ]]; then
+    grep -qF -- "$FIRST_GENERATION_COMMAND_MARKER" "$COMMAND_LINK" || return 0
+  fi
+  mkdir -p "$(dirname "$COMMAND_LINK")"
+  ln -sfn "$ROOT/bin/hyprpeach" "$COMMAND_LINK"
+  say "hyprpeach → $COMMAND_LINK"
+  case ":$PATH:" in
+    *":$(dirname "$COMMAND_LINK"):"*) ;;
+    *) say "note: $(dirname "$COMMAND_LINK") is not on your PATH, so 'hyprpeach' will not be found yet" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- desktops
+#
+# The one plugin that reaches outside Omarchy. Its bar strip only draws the
+# desk; the desk itself is the Lua library, which Hyprland has to be told to
+# load, with this machine's monitors.
+
+# The setup() call, with YOUR monitors already filled in.
+#
+# Registered as `hyprpeach` in package.loaded, so any require("hyprpeach")
+# elsewhere in the config gets this same copy, and a copy something else loaded
+# first is used rather than joined by a second one. The library keeps its state
+# in one module; two copies would each bind the keys and each keep their own
+# idea of which desktop is showing.
+setup_block() {
+  local monitors=$1
+  cat <<LUA
+$BEGIN
+-- Loaded from the hyprpeach plugin's clone, which \`omarchy plugin update\` keeps current.
+package.loaded.hyprpeach = package.loaded.hyprpeach
+  or dofile(os.getenv("HOME") .. "/.config/omarchy/plugins/$PLUGIN_ID/init.lua")
+require("hyprpeach").setup({
+  monitors_bottom_to_top = {
+$monitors
+  },
+})
+$END
+LUA
+}
+
+require_hyprland_config() {
+  require_command hyprctl "is Hyprland installed?"
+  require_command jq "install it with: omarchy pkg add jq"
+  [[ -f $ENTRY ]] || die "no $ENTRY — this expects Hyprland's Lua config"
+  # `grep -- "$BEGIN"`, with the end-of-options marker, because the marker
+  # itself starts with `--` and grep otherwise reads it as a flag, fails, and
+  # reports no match -- invisibly, in an `if`, so the block is appended again.
+  # Both markers have to be there: with only the opening one the awk below
+  # would treat everything after it as the block and delete the rest of the file.
+  if grep -qF -- "$BEGIN" "$ENTRY" && ! grep -qF -- "$END" "$ENTRY"; then
+    die "$ENTRY has the hyprpeach opening marker but not the closing one.\n  Repair or remove the block by hand, then run this again."
+  fi
+}
+
+# Every hyprpeach block in hyprland.lua replaced by `replacement` -- the FIRST
+# one by it, any others dropped -- so this converges on at most one however many
+# are there. An empty replacement removes the block.
+replace_hyprland_block() {
+  local replacement=$1
+  awk -v begin="$BEGIN" -v end="$END" -v replacement="$replacement" '
+    index($0,begin){ if (!done && replacement != "") print replacement; done=1; skipping=1; next }
+    index($0,end){ skipping=0; next }
+    !skipping' "$ENTRY" > "$ENTRY.hyprpeach.tmp"
+  mv "$ENTRY.hyprpeach.tmp" "$ENTRY"
+}
+
+reload_hyprland() {
+  hyprctl reload >/dev/null
+  local errors
+  errors=$(hyprctl configerrors | tr -d '[:space:]')
+  [[ -z $errors ]] || die "Hyprland reported config errors:\n$(hyprctl configerrors)"
+}
+
+add_desktops_to_hyprland() {
+  require_hyprland_config
+  hyprctl monitors -j >/dev/null 2>&1 || die "Hyprland is not running, so its monitors cannot be read"
+
+  # The monitors, in physical order with the bottom one first. Sorted by y
+  # descending because y grows downward, and matched by EDID description rather
+  # than connector name: DP-3 and DP-5 swap when cables move ports, and two
+  # monitors of one model would then quietly trade desktops.
+  local monitors
+  monitors=$(hyprctl monitors -j | jq -r 'sort_by(-.y) | .[] | "    \"desc:\(.description)\","')
+  [[ -n $monitors ]] || die "no monitors reported"
+  say "found $(wc -l <<<"$monitors") monitor(s), bottom first:"
+  sed 's/^/  /' <<<"$monitors"
+
+  if grep -qF -- "$BEGIN" "$ENTRY"; then
+    # Also the 1.x migration: the block 1.x wrote loads the library from
+    # ~/.config/hypr/hyprpeach, and this one loads it from the plugin.
+    replace_hyprland_block "$(setup_block "$monitors")"
+  else
+    say "appending hyprpeach to hyprland.lua (after your defaults, which is required)"
+    printf '\n%s\n' "$(setup_block "$monitors")" >> "$ENTRY"
+  fi
+
+  # Both of these are displaced rather than merely unused. `omarchy.workspaces`
+  # cannot draw a hyprpeach desk at all. `omarchy.menu` is the widget sitting
+  # ahead of the strip in the left section, and the strip is built to LEAD that
+  # section: it reaches out to line its first tile up with the edge of a tiled
+  # window, which is only the right place to be when nothing is in front of it.
+  # The menu stays one keypress away on SUPER. Removing desktops puts both back.
+  omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
+  omarchy plugin disable omarchy.menu >/dev/null 2>&1 || true
+  # A VERTICAL BAR, because the strip is a column of ten cells and a desk this
+  # model is for is wide. This is the one setting here that is a preference
+  # rather than a consequence, and it goes through Omarchy's own command rather
+  # than an edit to shell.json, so `omarchy bar position top` puts it back and
+  # nothing here will argue -- until desktops is added again.
+  omarchy bar position left >/dev/null 2>&1 || say "note: could not move the bar to the left"
+
+  if [[ -d $FIRST_GENERATION_CLONE/.git ]]; then
+    say "note: $FIRST_GENERATION_CLONE is the 1.x library, and nothing hyprpeach installs reads it now."
+    say "      Once nothing of your own requires it: rm -rf $FIRST_GENERATION_CLONE"
+  fi
+
+  reload_hyprland
+  say "press SUPER+2, and the whole desk turns"
+}
+
+# The inverse, as far as it can be known. The two displaced widgets go back
+# where Omarchy ships them. The bar's position does not: what it was before is
+# not recorded anywhere, and guessing would move somebody's bar twice.
+remove_desktops_from_hyprland() {
+  require_hyprland_config
+  replace_hyprland_block ""
+  omarchy plugin enable omarchy.workspaces >/dev/null 2>&1 || true
+  omarchy plugin enable omarchy.menu --section left >/dev/null 2>&1 || true
+  reload_hyprland
+  say "Hyprland's own workspace keys are back. The bar stays where it is: omarchy bar position top moves it."
+}
+
+# ---------------------------------------------------------------- the rest
+
+# Omarchy's update, then a Hyprland reload.
+#
+# The update is the whole upgrade -- every plugin added from here is a link into
+# the clone it moves -- except for the desktops library. Hyprland ran init.lua
+# when it loaded its config and keeps running that copy until it reloads; a new
+# init.lua on disk changes nothing until then.
+command_upgrade() {
+  require_installed_clone
+  require_command omarchy "hyprpeach is an Omarchy plugin"
+  omarchy plugin update "$PLUGIN_ID"
+  hyprctl reload >/dev/null
+  command_plugin_list
 }
 
 command_help() {
   cat <<'USAGE'
-🍑 hyprpeach — paired desktops across your monitors
+🍑 hyprpeach — Omarchy plugins for Hyprland on more than one monitor
 
-  hyprpeach upgrade    move to the newest release and re-run its installer
-  hyprpeach version    what is installed, and what is available
-  hyprpeach help       this
+  hyprpeach plugin list           the plugins in the collection, and which you have
+  hyprpeach plugin add <name>     add one — it updates whenever hyprpeach does
+  hyprpeach plugin remove <name>  take one off again
+  hyprpeach upgrade               omarchy plugin update, then reload Hyprland
+  hyprpeach version               the same as plugin list
+  hyprpeach link-command          put `hyprpeach` on PATH (the plugin does this itself)
+  hyprpeach help                  this
 
-Environment:
-  HYPRPEACH_REPOSITORY  where to fetch from
-  HYPRPEACH_CLONE       where the library lives (default ~/.config/hypr/hyprpeach)
+  Adding desktops again re-reads your monitors.
 USAGE
 }
 
 main() {
   case "${1:-help}" in
+    plugin)
+      case "${2:-list}" in
+        list) command_plugin_list ;;
+        add) command_plugin_add "${3:-}" ;;
+        remove) command_plugin_remove "${3:-}" ;;
+        *) command_help; die "unknown plugin command: $2" ;;
+      esac
+      ;;
     upgrade) command_upgrade ;;
-    version) command_version ;;
+    version) command_plugin_list ;;
+    link-command) command_link_command ;;
     help|-h|--help) command_help ;;
     *) command_help; die "unknown command: $1" ;;
   esac
