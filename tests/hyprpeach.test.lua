@@ -69,6 +69,7 @@ local function stub_hyprland(parameters)
       focus = function(options) return { kind = "focus", options = options } end,
       window = { move = function(options) return { kind = "move", options = options } end },
       workspace = { swap_monitors = function(options) return { kind = "swap", options = options } end },
+      event = function(payload) return { kind = "event", payload = payload } end,
     },
   }
   return recorder
@@ -108,6 +109,40 @@ do
     peach.setup({ monitors_bottom_to_top = { BOTTOM }, keys = { next_dektop = "SUPER + TAB" } })
   end)
   check({ label = "an unknown key name is refused, not ignored", got = typo, want = false })
+end
+
+-- --------------------------------------------------------------------------
+print("\nthe overview key fires one event for every monitor")
+do
+  local peach, recorder = fresh_peach({})
+  -- The shell's overview listens for exactly this name. Renaming it on one side
+  -- only is a key that silently does nothing.
+  check({ label = "SUPER + TAB is bound", got = recorder.bound["SUPER + TAB"], want = "Every desktop at once" })
+  recorder.actions["SUPER + TAB"]()
+  local fired = recorder.dispatched[#recorder.dispatched]
+  check({ label = "it dispatches a custom event", got = fired and fired.kind, want = "event" })
+  check({ label = "  ...named for the overview", got = fired and fired.payload, want = "hyprpeach-overview,toggle" })
+  check({ label = "and nothing else", got = #recorder.dispatched, want = 1 })
+
+  local _, freed = fresh_peach({ keys = { toggle_overview = false } })
+  check({ label = "toggle_overview = false frees the key", got = freed.bound["SUPER + TAB"], want = nil })
+  peach.toggle_overview()
+end
+
+-- --------------------------------------------------------------------------
+print("\nsetup publishes the desktop count for the overview")
+do
+  local _, recorder = fresh_peach({})
+  local function published(written)
+    for path, contents in pairs(written) do
+      if path:match("/hyprpeach%-desktop%-count$") then return contents end
+    end
+  end
+  check({ label = "ten by default", got = published(recorder.written), want = "10\n" })
+  local recorder_six = stub_hyprland({})
+  package.loaded.hyprpeach = nil
+  dofile("init.lua").setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 6, notify = false })
+  check({ label = "and whatever setup was given", got = published(recorder_six.written), want = "6\n" })
 end
 
 -- --------------------------------------------------------------------------
@@ -537,7 +572,7 @@ do
     monitors = { [BOTTOM] = bottom, [TOP] = top }, monitor_at_cursor = top, active_workspace = { id = 3 },
   })
   local path
-  for written_path in pairs(recorder.written) do path = written_path end
+  for written_path in pairs(recorder.written) do if written_path:match("/hyprpeach%-held%-panels$") then path = written_path end end
   check({ label = "setup publishes, so a reload cannot leave a stale lock drawn", got = path ~= nil, want = true })
   check({ label = "  ...and publishes nothing held", got = recorder.written[path], want = "" })
 

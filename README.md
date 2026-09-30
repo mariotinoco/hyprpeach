@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v2.0.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v2.1.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v2.0.0`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v2.1.0`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -118,6 +118,7 @@ require("hyprpeach").setup({
     send_window_to_panel_above      = "SUPER + SHIFT + UP",
     send_window_to_panel_below      = "SUPER + SHIFT + DOWN",
     toggle_held_panel               = "SUPER + Y",
+    toggle_overview                 = "SUPER + TAB",  -- does nothing without the overview plugin
 
     send_window_and_follow_modifier = false,  -- always follows, whatever the flag says
     next_desktop                    = false,
@@ -163,9 +164,10 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 2.0.0
-  🍑 desktops     2.0.0    added            Multi-Monitor Desktops
+🍑 hyprpeach 2.1.0
+  🍑 desktops     2.1.0    added            Multi-Monitor Desktops
   🌱 dev-ports    0.1.0    not added        Local Ports
+  🌱 overview     0.1.0    not added        Desktop Overview
 
 $ hyprpeach plugin add dev-ports
 $ hyprpeach plugin remove desktops
@@ -174,6 +176,7 @@ $ hyprpeach plugin remove desktops
 | Plugin | |
 |---|---|
 | [**desktops**](#how-it-works) — Multi-Monitor Desktops | A desktop that spans every monitor and turns as one: the library, [the bar strip](#the-bar-strip), and the overlay. Two monitors, three, one [held](#holding-a-panel) while the rest move. |
+| [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + TAB` shows every desktop at once, on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
 | [**dev-ports**](plugins/dev-ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
 
 **They update with hyprpeach.** `add` links the plugin's folder inside hyprpeach's clone into Omarchy's plugins folder, rather than copying it out, so the one `omarchy plugin update` that moves hyprpeach moves every plugin you added from it. There is nothing else to keep current, and nothing that can fall behind.
@@ -211,7 +214,7 @@ Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.0.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.0
 hyprctl reload
 ```
 
@@ -223,7 +226,7 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.0.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.0
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add dev-ports
 ```
@@ -344,7 +347,7 @@ Stock Omarchy bindings, given up on purpose: on a two-panel desk the desktop str
 
 ### Off by default
 
-`SUPER + TAB`, `SUPER + SHIFT + TAB`, `SUPER + CTRL + TAB`, `SUPER + scroll` and `SUPER + SHIFT + ALT + 1…0` are bound to nothing — the table above already covers the day. Name a chord for any of them in [`keys`](#install) to bring it back.
+`SUPER + SHIFT + TAB`, `SUPER + CTRL + TAB`, `SUPER + scroll` and `SUPER + SHIFT + ALT + 1…0` are bound to nothing — the table above already covers the day. Name a chord for any of them in [`keys`](#install) to bring it back.
 
 > [!IMPORTANT]
 > Their **stock** bindings are cleared regardless, and so is the whole ten-key number row even when you have fewer desktops. A chord hyprpeach declines to bind is not a chord that falls silent — it is the stock one, still live, still moving a single panel.
@@ -371,6 +374,7 @@ local peach = require("hyprpeach")
 | `peach.send_active_window_to_panel({ step, follow })` | Move a window between panels, keeping its desktop |
 | `peach.swap_panels()` | Swap what the two panels show |
 | `peach.gather_rogue_windows()` | Rescue windows stranded outside every band |
+| `peach.toggle_overview()` | Open or close [the overview](plugins/overview/README.md) on every monitor |
 | `peach.describe()` | One line of live state, and whether the panels agree |
 
 ### Wiring up a status bar

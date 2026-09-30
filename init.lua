@@ -96,6 +96,11 @@ local DEFAULTS = {
     -- discoverable only if the key exists.
     toggle_held_panel               = "SUPER + Y",
 
+    -- Every desktop at once, each monitor showing its own. Drawn by the
+    -- overview plugin (`hyprpeach plugin add overview`); without it the key
+    -- does nothing, which is what SUPER + TAB did here before it existed.
+    toggle_overview                 = "SUPER + TAB",
+
     -- Off. Real capabilities, still callable as `peach.*`; they simply do not
     -- earn a key when the rule above already covers the day.
     send_window_and_follow_modifier = false,
@@ -257,6 +262,23 @@ end
 --- Hyprland reload clears the file at the same moment it clears the memory and
 --- the two cannot drift apart.
 local HELD_PANELS_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/hyprpeach-held-panels"
+
+--- How many desktops there are, for the overview to draw.
+---
+--- The overview shows each monitor the band it is on, and a band is exactly
+--- this many workspaces. It cannot be counted from the compositor: on a laptop
+--- taken off its dock, the external monitors' workspaces pile onto the one
+--- panel left, and counting that panel's workspaces gives three bands' worth.
+--- Published beside the held panels, by the same idiom, rewritten on every
+--- setup.
+local DESKTOP_COUNT_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/hyprpeach-desktop-count"
+
+local function publish_desktop_count()
+  local file = io.open(DESKTOP_COUNT_PATH, "w")
+  if file == nil then return end
+  file:write(tostring(state.desktop_count), "\n")
+  file:close()
+end
 
 --- One held panel per line: the monitor's name, a space, and the desktop it is
 --- holding.
@@ -553,6 +575,17 @@ function peach.toggle_held_panel()
   publish_held_panels()
 end
 
+--- Open or close the overview on every monitor.
+---
+--- AN EVENT, NOT A CALL INTO THE SHELL. `omarchy-shell` routes a command to one
+--- shell instance, which draws on one monitor, and an overview on one screen of
+--- a desk is half an overview. A Hyprland custom event reaches every listener
+--- on the event socket, so every monitor opens together. The library says
+--- nothing about what is drawn; the overview plugin decides that.
+function peach.toggle_overview()
+  hl.dispatch(hl.dsp.event("hyprpeach-overview,toggle"))
+end
+
 --- Sweep windows stranded outside every band onto the desktop in front of you.
 ---
 --- Unplugging a monitor leaves its windows on workspaces no panel owns, and no
@@ -737,6 +770,7 @@ local function create_bindings(parameters)
   end, "Send window to the panel below")
 
   bind(keys.toggle_held_panel, function() peach.toggle_held_panel() end, "Hold the panel under the pointer")
+  bind(keys.toggle_overview, function() peach.toggle_overview() end, "Every desktop at once")
   bind(keys.swap_panels, function() peach.swap_panels() end, "Swap what the panels show")
   bind(keys.gather_rogue_windows, function() peach.gather_rogue_windows() end, "Gather stranded windows")
 end
@@ -793,6 +827,7 @@ function peach.setup(options)
   -- says. A reload that cleared the memory and left a stale file behind would
   -- have the bar drawing a lock on a panel that moves.
   publish_held_panels()
+  publish_desktop_count()
 
   create_workspace_rules()
   if chosen("unbind_conflicting_defaults") then unbind_conflicting_defaults({ keys = keys }) end

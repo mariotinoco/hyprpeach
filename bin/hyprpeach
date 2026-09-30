@@ -100,6 +100,19 @@ plugin_state() {
   fi
 }
 
+# The plugins this one needs added first, from its manifest's
+# `hyprpeach.requires` -- declared beside the plugin rather than known here, so
+# a new plugin says what it needs without this file learning its name.
+required_plugin_names() {
+  local name=$1
+  jq -r '.hyprpeach.requires // [] | .[]' "$ROOT/plugins/$name/manifest.json"
+}
+
+plugin_is_added() {
+  local name=$1
+  [[ $(plugin_state "$name" "$(manifest_field "$ROOT/plugins/$name/manifest.json" id)") == added ]]
+}
+
 # 🍑 a plugin you have, 🌱 one you could, ❔ one in a state `add` will explain.
 command_plugin_list() {
   say "hyprpeach $(manifest_field "$ROOT/manifest.json" version) ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "not a git checkout"))"
@@ -141,6 +154,12 @@ command_plugin_add() {
   local id
   id=$(manifest_field "$source/manifest.json" id)
   local target="$PLUGINS_DIRECTORY/$id"
+
+  # Refused rather than added for you, so what gets added is what you typed.
+  local required
+  while IFS= read -r required; do
+    plugin_is_added "$required" || die "$name needs $required.\n  Add it first: hyprpeach plugin add $required"
+  done < <(required_plugin_names "$name")
 
   local state
   state=$(plugin_state "$name" "$id")
@@ -202,6 +221,11 @@ command_plugin_remove() {
   local id
   id=$(manifest_field "$ROOT/plugins/$name/manifest.json" id)
   [[ $(plugin_state "$name" "$id") == added ]] || die "$id was not added by hyprpeach, so it is left alone"
+  local other
+  while IFS= read -r other; do
+    plugin_is_added "$other" || continue
+    required_plugin_names "$other" | grep -xF -- "$name" >/dev/null && die "$other needs $name.\n  Remove it first: hyprpeach plugin remove $other"
+  done < <(available_plugin_names)
   [[ $name != desktops ]] || remove_desktops_from_hyprland
   omarchy plugin remove "$id" --yes >/dev/null
   say "removed $id"
@@ -304,8 +328,14 @@ add_desktops_to_hyprland() {
   # descending because y grows downward, and matched by EDID description rather
   # than connector name: DP-3 and DP-5 swap when cables move ports, and two
   # monitors of one model would then quietly trade desktops.
+  #
+  # Then left to right, for monitors side by side at one height, which would
+  # otherwise come out in whatever order Hyprland lists them. On a laptop
+  # docked between two screens and centred on them, the laptop sorts first --
+  # it sits lower -- and so keeps desktops 1-10, which is right: it is the
+  # screen still there when the dock is not.
   local monitors
-  monitors=$(hyprctl monitors -j | jq -r 'sort_by(-.y) | .[] | "    \"desc:\(.description)\","')
+  monitors=$(hyprctl monitors -j | jq -r 'sort_by(-.y, .x) | .[] | "    \"desc:\(.description)\","')
   [[ -n $monitors ]] || die "no monitors reported"
   say "found $(wc -l <<<"$monitors") monitor(s), bottom first:"
   sed 's/^/  /' <<<"$monitors"

@@ -92,7 +92,8 @@ cat > "$FAKES/hyprctl" <<'FAKE'
 printf 'hyprctl %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
 case "${1:-}" in
   monitors)
-    echo '[{"name":"DP-5","y":0,"description":"Example Panel Bottom 0001"},{"name":"DP-3","y":-2160,"description":"Example Panel Top 0002"}]' ;;
+    if [[ -f $HOME/monitors.json ]]; then cat "$HOME/monitors.json"; else
+    echo '[{"name":"DP-5","x":0,"y":0,"description":"Example Panel Bottom 0001"},{"name":"DP-3","x":0,"y":-2160,"description":"Example Panel Top 0002"}]'; fi ;;
   configerrors) echo "" ;;
 esac
 FAKE
@@ -171,6 +172,10 @@ require("hyprpeach").setup({
   },
 })
 -- <<< hyprpeach <<<
+
+-- >>> hyprpeach >>>
+-- A second copy, as 1.0.0's installer left on every re-run.
+-- <<< hyprpeach <<<
 LUA
 git clone --quiet "$UPSTREAM" "$SANDBOX/vanished"
 git_quietly -C "$SANDBOX/vanished" reset --quiet --hard v1.3.0
@@ -190,7 +195,7 @@ check "on the remote's newest commit" "$(git -C "$PLUGIN" rev-parse HEAD)" "$UPS
 check "and enabled, so its service keeps the command on PATH" "$(called 'omarchy plugin enable hyprpeach')" "1"
 check "desktops is added, as a link into the collection" "$(link_of hyprpeach.desktops)" "hyprpeach/plugins/desktops"
 check "hyprpeach on PATH is now a link into the plugin" "$(readlink -f "$HOME/.local/bin/hyprpeach")" "$(readlink -f "$PLUGIN")/bin/hyprpeach"
-check "exactly one hyprpeach block" "$(blocks)" "1"
+check "exactly one hyprpeach block, however many 1.x left" "$(blocks)" "1"
 grep -qF '/.config/omarchy/plugins/hyprpeach/init.lua' "$HOME/.config/hypr/hyprland.lua"
 check "the block loads the library from the plugin" "$?" "0"
 grep -qF '/.config/hypr/?/init.lua' "$HOME/.config/hypr/hyprland.lua"
@@ -280,6 +285,42 @@ check "with both removed, neither is listed as added" "$(listed 🌱 desktops 'n
 check "and the clone is still clean" "$(git -C "$PLUGIN" status --porcelain | wc -l)" "0"
 hyprpeach plugin add desktops >/dev/null 2>&1
 check "desktops comes back" "$(link_of hyprpeach.desktops)$(blocks)" "hyprpeach/plugins/desktops1"
+
+echo
+echo "three monitors side by side: the laptop first, then the rest left to right"
+# A laptop docked between two screens and centred on them, listed in the order
+# Hyprland happened to give -- right Dell first -- to show the order written does
+# not depend on it.
+cat > "$HOME/monitors.json" <<'JSON'
+[{"name":"DP-1","x":5760,"y":0,"description":"Example Dell Right"},
+ {"name":"eDP-1","x":3840,"y":480,"description":"Example Laptop"},
+ {"name":"DP-2","x":0,"y":0,"description":"Example Dell Left"}]
+JSON
+hyprpeach plugin add desktops >/dev/null 2>&1
+check "the monitors are written laptop, left, right" "$(grep -o 'Example [A-Za-z ]*' "$HOME/.config/hypr/hyprland.lua" | tr '\n' ',')" "Example Laptop,Example Dell Left,Example Dell Right,"
+rm "$HOME/monitors.json"
+hyprpeach plugin add desktops >/dev/null 2>&1
+
+echo
+echo "a plugin that needs another is refused without it, and holds on to it"
+# overview's manifest says it requires desktops: it switches desktops through
+# the library desktops puts in Hyprland, and without it every click is a no-op.
+hyprpeach plugin remove desktops >/dev/null 2>&1
+hyprpeach plugin add overview > "$SANDBOX/requires.out" 2>&1
+check "overview without desktops is refused" "$?" "1"
+grep -q "hyprpeach plugin add desktops" "$SANDBOX/requires.out"
+check "and the refusal says what to add first" "$?" "0"
+check "nothing was linked" "$([[ -L $(plugins_directory)/hyprpeach.overview ]] && echo linked || echo none)" "none"
+hyprpeach plugin add desktops >/dev/null 2>&1
+hyprpeach plugin add overview >/dev/null 2>&1
+check "with desktops added, overview is" "$(link_of hyprpeach.overview)" "hyprpeach/plugins/overview"
+hyprpeach plugin remove desktops > "$SANDBOX/requires.out" 2>&1
+check "desktops cannot be removed out from under it" "$?" "1"
+grep -q "hyprpeach plugin remove overview" "$SANDBOX/requires.out"
+check "and the refusal says what to remove first" "$?" "0"
+check "desktops is still added" "$(link_of hyprpeach.desktops)$(blocks)" "hyprpeach/plugins/desktops1"
+hyprpeach plugin remove overview >/dev/null 2>&1
+check "overview comes off on its own" "$([[ -L $(plugins_directory)/hyprpeach.overview ]] && echo linked || echo none)" "none"
 
 echo
 echo "one Omarchy update moves the plugins with it"

@@ -92,6 +92,7 @@ they agree.
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.
 `bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.
 `bash tests/dev-ports.test.sh` — the dev-ports reader and its model, against a fake `ss`.
+`bash tests/overview.test.sh` — the overview's model: desktops, windows, grid.
 All green before a release.
 
 **A test never reaches the machine it runs on.** One did: the 1.x installer test
