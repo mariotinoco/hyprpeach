@@ -108,6 +108,17 @@ required_plugin_names() {
   jq -r '.hyprpeach.requires // [] | .[]' "$ROOT/plugins/$name/manifest.json"
 }
 
+# A plugin's own setup step, declared as `hyprpeach.prepare` in its manifest:
+# a script beside it that builds or fetches what the plugin needs before it can
+# run. Declared rather than known here by name, like `requires`.
+prepare_plugin() {
+  local name=$1
+  local script
+  script=$(jq -r '.hyprpeach.prepare // empty' "$ROOT/plugins/$name/manifest.json")
+  [[ -n $script ]] || return 0
+  "$ROOT/plugins/$name/$script" || die "$name could not be prepared, so it was not added"
+}
+
 plugin_is_added() {
   local name=$1
   [[ $(plugin_state "$name" "$(manifest_field "$ROOT/plugins/$name/manifest.json" id)") == added ]]
@@ -182,6 +193,10 @@ command_plugin_add() {
       say "moved the copy at $target to $backup"
       ;;
   esac
+
+  # Before linking, so a plugin whose build or download fails is never on the
+  # bar half-working. Also on an add of one already added: that re-checks it.
+  prepare_plugin "$name"
 
   if [[ $state != added ]]; then
     omarchy plugin validate "$source" >/dev/null || die \
@@ -398,6 +413,11 @@ command_upgrade() {
   require_command omarchy "hyprpeach is an Omarchy plugin"
   omarchy plugin update "$PLUGIN_ID"
   hyprctl reload >/dev/null
+  # An update can move a plugin's source on; its build has to follow.
+  local name
+  while IFS= read -r name; do
+    plugin_is_added "$name" && prepare_plugin "$name"
+  done < <(available_plugin_names)
   command_plugin_list
 }
 

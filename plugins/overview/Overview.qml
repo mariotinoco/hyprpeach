@@ -39,6 +39,7 @@ Item {
   }
 
   function close() {
+    if (root.opened) root.announce("closed")
     root.opened = false
   }
 
@@ -76,11 +77,36 @@ Item {
       onStreamFinished: {
         root.state = Model.parse(text)
         root.opened = root.state.error === ""
+        if (root.opened) root.announce("open")
       }
     }
   }
 
   Process { id: focuser }
+
+  // OPEN AND CLOSED, ANNOUNCED -- for the orbit renderer, which draws each
+  // desktop's viewport in the cells this leaves see-through, and has to know
+  // when to rise above the windows to do it. SUPER + TAB only says "toggle";
+  // this overview is what knows which way it went, and closes on keys and
+  // clicks the library never sees.
+  Process { id: announcer }
+  function announce(state) {
+    announcer.command = ["hyprctl", "eval", "hl.dispatch(hl.dsp.event(\"hyprpeach-overview," + state + "\"))"]
+    announcer.running = true
+  }
+
+  // Whether the orbit scene is behind the desk (plugins/orbit writes this).
+  // With it, the cells are windows onto the universe rather than onto the
+  // wallpaper: no scrim, no picture, only the frames and the live windows.
+  property bool orbit: false
+  FileView {
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-orbit"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: root.orbit = text().trim() === "running"
+    onLoadFailed: root.orbit = false
+  }
 
   // Held panels, as the library publishes them: "<monitor> <desktop>" lines.
   FileView {
@@ -139,7 +165,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Util.alpha(Color.background, 0.94)
+          color: root.orbit ? "transparent" : Util.alpha(Color.background, 0.94)
         }
 
         // A click on the space between cells closes it, the way a click off
@@ -185,10 +211,11 @@ Item {
                 id: frame
                 anchors.fill: parent
                 radius: Math.round(panel.grid.cellHeight * 0.03)
-                color: Color.background
+                color: root.orbit ? "transparent" : Color.background
                 clip: true
 
                 Image {
+                  visible: !root.orbit
                   anchors.fill: parent
                   source: Util.fileUrl(root.backgroundPath)
                   fillMode: Image.PreserveAspectCrop

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Builds the orbit renderer and lays down the planet it draws.
+#
+# Run by `hyprpeach plugin add orbit`, by `hyprpeach upgrade`, and by the
+# plugin's service on every start with `--if-stale`, which returns at once when
+# nothing changed. Everything it makes lives outside the plugin's folder --
+# the build under ~/.cache, the program and imagery under ~/.local/share -- so
+# `omarchy plugin update` never meets a file it did not ship.
+#
+# THE IMAGERY IS NASA'S, and public domain: Blue Marble (day), Black Marble
+# (night lights), the cloud composite, GEBCO elevation, and the LRO Moon. It is
+# fetched rather than committed -- 85 MB of originals, scaled once here so the
+# renderer never decodes a 21600-pixel map at startup.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)
+DATA="$HOME/.local/share/hyprpeach/orbit"
+ASSETS="$DATA/assets"
+TARGET="$HOME/.cache/hyprpeach/orbit-target"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+# What the build was made from: the renderer's own files, hashed. Not a git
+# revision, because the stamp has to mean the same thing in any copy.
+source_stamp() {
+  (cd "$HERE/renderer" && cat Cargo.toml Cargo.lock src/*) | sha256sum | cut -d' ' -f1
+}
+
+ready() {
+  [[ -x $DATA/hyprpeach-orbit && $(cat "$DATA/stamp" 2>/dev/null) == "$(source_stamp)" ]] || return 1
+  local file
+  for file in day.jpg night.jpg clouds.png height.png moon.jpg; do [[ -s $ASSETS/$file ]] || return 1; done
+}
+
+build() {
+  command -v cargo >/dev/null || die "orbit is built from source, and there is no Rust here.\n  Install it: mise use -g rust@latest   (or: omarchy pkg add rust)"
+  say "building the orbit renderer (the first build takes a few minutes)"
+  cargo build --release --locked --quiet --manifest-path "$HERE/renderer/Cargo.toml" --target-dir "$TARGET"
+  mkdir -p "$DATA"
+  install -m 755 "$TARGET/release/hyprpeach-orbit" "$DATA/hyprpeach-orbit"
+  source_stamp > "$DATA/stamp"
+}
+
+# name, url, then how to make it: each map is fetched to a temporary file and
+# scaled into place, so a failed download never leaves a half-written map.
+fetch() {
+  local name=$1 url=$2; shift 2
+  [[ -s $ASSETS/$name ]] && return 0
+  command -v curl >/dev/null || die "curl is needed to fetch the planet"
+  command -v magick >/dev/null || die "ImageMagick is needed to prepare the planet: omarchy pkg add imagemagick"
+  mkdir -p "$ASSETS"
+  local download
+  download=$(mktemp "$ASSETS/.download.XXXXXX")
+  say "fetching $name"
+  curl -fsSL -o "$download" "$url" || { rm -f "$download"; die "could not fetch $url"; }
+  magick "$download" "$@" "$ASSETS/.$name" && mv "$ASSETS/.$name" "$ASSETS/$name"
+  rm -f "$download"
+}
+
+fetch_planet() {
+  local nasa=https://eoimages.gsfc.nasa.gov/images/imagerecords
+  fetch day.jpg "$nasa/74000/74092/world.200407.3x21600x10800.jpg" -resize 16384x8192 -quality 93
+  fetch night.jpg "$nasa/144000/144898/BlackMarble_2016_3km.jpg" -quality 93
+  fetch clouds.png "$nasa/57000/57747/cloud_combined_8192.tif" -colorspace Gray -depth 8
+  # Blurred a little: 8-bit elevation stepped into visible terraces under the
+  # exaggerated relief lighting.
+  fetch height.png "$nasa/73000/73934/gebco_08_rev_elev_21600x10800.png" -resize 8192x4096 -blur 0x1.6 -depth 8
+  fetch moon.jpg "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_2k.tif" -quality 90
+}
+
+main() {
+  if [[ ${1:-} == --if-stale ]] && ready; then return 0; fi
+  [[ -x $DATA/hyprpeach-orbit && $(cat "$DATA/stamp" 2>/dev/null) == "$(source_stamp)" ]] || build
+  fetch_planet
+  say "orbit is ready"
+}
+
+main "$@"
