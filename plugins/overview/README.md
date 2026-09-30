@@ -1,6 +1,6 @@
 # Desktop Overview
 
-Every desktop at once, on every monitor. `SUPER + TAB` opens it on all your
+Every desktop at once, on every monitor. `SUPER + TAB` or `SUPER + 0` opens it on all your
 screens together; each screen shows a grid of **its own** desktops, with live
 pictures of the windows on them. Pick one and the whole desk turns to it.
 
@@ -11,18 +11,18 @@ hyprpeach plugin add overview
 It needs [desktops](../../README.md#more-plugins), which is what turns the desk,
 so add that first.
 
-- **Click** a desktop, or press its **number** (`0` is ten), to go there.
-- **Esc**, `SUPER + TAB` again, or a click between desktops closes it.
+- **Click** a desktop, or press its **number**, to go there.
+- **Esc**, `0`, `SUPER + TAB` again, or a click between desktops closes it.
 - The current desktop is outlined. A [held](../../README.md#holding-a-panel)
   screen says so, and stays where it is while the rest move.
 
 Each screen shows the desktops the number keys reach, and only those — so on a
 laptop taken off its dock, where the other screens' workspaces pile onto the
-one panel left, it still shows ten, not thirty.
+one panel left, it still shows nine, not twenty-seven.
 
 The grid is worked out from each monitor's shape, so every desktop is drawn at
-its screen's own proportions: ten desktops on a 32:9 panel come out four
-across, three down, without squashing the picture.
+its screen's own proportions, three across and three down, the desk's own
+3 × 3, without squashing the picture.
 
 ## Live, even on desktops you are not on
 

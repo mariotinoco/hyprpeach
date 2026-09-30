@@ -30,7 +30,6 @@ Item {
   property bool opened: false
   property var state: ({ monitors: [], clients: [], workspaces: [], error: "" })
   property var heldPanels: ({})
-  property int desktopCount: 10
 
   readonly property string backgroundPath: Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
 
@@ -83,16 +82,6 @@ Item {
 
   Process { id: focuser }
 
-  // How many desktops a band holds, as setup() published it.
-  FileView {
-    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-desktop-count"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: root.desktopCount = Model.desktopCount(text())
-    onLoadFailed: root.desktopCount = 10
-  }
-
   // Held panels, as the library publishes them: "<monitor> <desktop>" lines.
   FileView {
     path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-held-panels"
@@ -116,13 +105,12 @@ Item {
 
         readonly property string monitorName: panel.screen ? String(panel.screen.name || "") : ""
         readonly property var monitor: Model.monitorNamed(root.state, panel.monitorName)
-        readonly property var desktops: Model.desktopsOf(root.state, panel.monitorName, root.desktopCount)
+        readonly property var desktops: Model.desktopsOf(root.state, panel.monitorName)
         readonly property int activeWorkspaceId: panel.monitor && panel.monitor.activeWorkspace ? panel.monitor.activeWorkspace.id : -1
         readonly property bool held: root.heldPanels[panel.monitorName] !== undefined
 
         readonly property int gap: Math.round(panel.height * 0.012)
         readonly property var grid: Model.gridFor({
-          count: Math.max(1, panel.desktops.length),
           width: panel.width * 0.92,
           height: panel.height * 0.86,
           gap: panel.gap,
@@ -165,7 +153,7 @@ Item {
           anchors.fill: parent
           focus: true
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape) { root.close(); event.accepted = true; return }
+            if (event.key === Qt.Key_Escape || Model.closesOverview(event.text)) { root.close(); event.accepted = true; return }
             var desktop = Model.desktopForKey(event.text)
             if (desktop > 0) { root.focusDesktop(desktop); event.accepted = true }
           }
@@ -269,8 +257,7 @@ Item {
 
               Text {
                 anchors { left: parent.left; bottom: parent.bottom; margins: Math.round(panel.grid.cellHeight * 0.05) }
-                // 10 is drawn as 0, because that is the key you press for it.
-                text: cell.modelData.desktop === 10 ? "0" : String(cell.modelData.desktop)
+                text: String(cell.modelData.desktop)
                 color: Color.foreground
                 style: Text.Outline
                 styleColor: Util.alpha(Color.background, 0.8)

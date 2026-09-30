@@ -19,7 +19,7 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {} }
+  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {} }
 
   -- The held-panel state is published to a file for the bar strip to watch, so
   -- writes are captured here rather than landing in the running session's
@@ -42,7 +42,10 @@ local function stub_hyprland(parameters)
     -- A move is APPLIED, not just recorded: a window that has been moved is on
     -- the workspace it was moved to. Without that, a repair that runs twice and
     -- corrects nothing the second time reads here as a repair that fires twice.
+    -- Events are announcements, not moves, and are kept apart: a test counting
+    -- a paired switch's dispatches is counting what moved the panels.
     dispatch = function(descriptor)
+      if descriptor.kind == "event" then recorder.events[#recorder.events + 1] = descriptor.payload; return end
       recorder.dispatched[#recorder.dispatched + 1] = descriptor
       if descriptor.kind == "move" and type(descriptor.options.window) == "table" then
         descriptor.options.window.workspace = { id = tonumber(descriptor.options.workspace) }
@@ -119,10 +122,9 @@ do
   -- only is a key that silently does nothing.
   check({ label = "SUPER + TAB is bound", got = recorder.bound["SUPER + TAB"], want = "Every desktop at once" })
   recorder.actions["SUPER + TAB"]()
-  local fired = recorder.dispatched[#recorder.dispatched]
-  check({ label = "it dispatches a custom event", got = fired and fired.kind, want = "event" })
-  check({ label = "  ...named for the overview", got = fired and fired.payload, want = "hyprpeach-overview,toggle" })
-  check({ label = "and nothing else", got = #recorder.dispatched, want = 1 })
+  check({ label = "it fires one custom event", got = #recorder.events, want = 1 })
+  check({ label = "  ...named for the overview", got = recorder.events[1], want = "hyprpeach-overview,toggle" })
+  check({ label = "and moves nothing", got = #recorder.dispatched, want = 0 })
 
   local _, freed = fresh_peach({ keys = { toggle_overview = false } })
   check({ label = "toggle_overview = false frees the key", got = freed.bound["SUPER + TAB"], want = nil })
@@ -130,53 +132,64 @@ do
 end
 
 -- --------------------------------------------------------------------------
-print("\nsetup publishes the desktop count for the overview")
+print("\nnine desktops, a 3 x 3, and not a setting")
 do
-  local _, recorder = fresh_peach({})
-  local function published(written)
-    for path, contents in pairs(written) do
-      if path:match("/hyprpeach%-desktop%-count$") then return contents end
-    end
-  end
-  check({ label = "ten by default", got = published(recorder.written), want = "10\n" })
-  local recorder_six = stub_hyprland({})
+  stub_hyprland({})
   package.loaded.hyprpeach = nil
-  dofile("init.lua").setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 6, notify = false })
-  check({ label = "and whatever setup was given", got = published(recorder_six.written), want = "6\n" })
+  local ok, message = pcall(function()
+    dofile("init.lua").setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 10, notify = false })
+  end)
+  check({ label = "desktop_count is refused rather than ignored", got = ok, want = false })
+  check({ label = "  ...and the refusal says what replaced it", got = message:find("SUPER + 0", 1, true) ~= nil, want = true })
+
+  local _, recorder = fresh_peach({})
+  check({ label = "SUPER + 0 opens the overview", got = recorder.bound["SUPER + code:19"], want = "Every desktop at once" })
+  recorder.actions["SUPER + code:19"]()
+  check({ label = "  ...through the same event as SUPER + TAB", got = recorder.events[#recorder.events], want = "hyprpeach-overview,toggle" })
+  check({ label = "SUPER + 9 is the last desktop", got = recorder.bound["SUPER + code:18"], want = "Focus desktop 9" })
+  check({ label = "SUPER + SHIFT + 0 sends nowhere", got = recorder.bound["SUPER + SHIFT + code:19"], want = nil })
+end
+
+-- --------------------------------------------------------------------------
+print("\na desk switch is announced, once")
+do
+  local peach, recorder = fresh_peach({})
+  peach.focus_desktop({ desktop = 4 })
+  local events = recorder.events
+  -- The number on screen, the overview and the orbit scene all hear this; one
+  -- per switch, however many panels moved.
+  check({ label = "one event for a two-panel switch", got = #events, want = 1 })
+  check({ label = "  ...naming the desktop", got = events[1], want = "hyprpeach-desktop,4" })
 end
 
 -- --------------------------------------------------------------------------
 print("\nworkspace rules pin every desktop to every panel")
 do
   local _, recorder = fresh_peach({})
-  check({ label = "2 panels x 10 desktops = 20 rules", got = #recorder.rules, want = 20 })
+  check({ label = "2 panels x 9 desktops = 18 rules", got = #recorder.rules, want = 18 })
   check({ label = "bottom desktop 1 is workspace 1", got = recorder.rules[1].workspace, want = "1" })
   check({ label = "  ...on the bottom monitor", got = recorder.rules[1].monitor, want = BOTTOM })
   check({ label = "  ...and is the default", got = recorder.rules[1].default, want = true })
   check({ label = "bottom desktop 2 is NOT default", got = recorder.rules[2].default, want = false })
-  check({ label = "top desktop 1 is workspace 11", got = recorder.rules[11].workspace, want = "11" })
-  check({ label = "  ...on the top monitor", got = recorder.rules[11].monitor, want = TOP })
-  check({ label = "top desktop 10 is workspace 20", got = recorder.rules[20].workspace, want = "20" })
+  check({ label = "top desktop 1 is workspace 11", got = recorder.rules[10].workspace, want = "11" })
+  check({ label = "  ...on the top monitor", got = recorder.rules[10].monitor, want = TOP })
+  check({ label = "top desktop 9 is workspace 19", got = recorder.rules[18].workspace, want = "19" })
   -- Without this an emptied workspace is destroyed and forgets its monitor.
   check({ label = "every rule is persistent", got = recorder.rules[7].persistent, want = true })
 end
 
 -- --------------------------------------------------------------------------
-print("\nthe band is as wide as the desktop count, because it holds one each")
+print("\nthe bands stay ten wide, so no window changes workspace on upgrade")
 do
-  -- There used to be a separate stride, which could be set smaller than the
-  -- count and would then silently overlap two monitors' bands. A band holds
-  -- exactly one workspace per desktop, so the two were always the same number
-  -- and one of them could only ever be wrong.
-  package.loaded.hyprpeach = nil
-  local recorder = stub_hyprland({})
-  local peach = dofile("init.lua")
-  peach.setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 4, notify = false })
-  check({ label = "4 desktops on 2 panels = 8 rules", got = #recorder.rules, want = 8 })
-  check({ label = "bottom band is 1-4", got = recorder.rules[4].workspace, want = "4" })
-  check({ label = "top band starts right after, at 5", got = recorder.rules[5].workspace, want = "5" })
-  check({ label = "  ...on the top monitor", got = recorder.rules[5].monitor, want = TOP })
-  check({ label = "top band ends at 8", got = recorder.rules[8].workspace, want = "8" })
+  -- 2.x had ten desktops. Keeping each band ten workspaces wide keeps every
+  -- window's workspace number meaning what it meant: bottom desktop 3 is still
+  -- workspace 3, top desktop 3 still 13. The tenth of each band is left out.
+  local _, recorder = fresh_peach({})
+  local pinned = {}
+  for _, rule in ipairs(recorder.rules) do pinned[rule.workspace] = true end
+  check({ label = "top desktop 3 is still workspace 13", got = pinned["13"], want = true })
+  check({ label = "workspace 10 is no desktop", got = pinned["10"], want = nil })
+  check({ label = "nor is workspace 20", got = pinned["20"], want = nil })
 end
 
 -- --------------------------------------------------------------------------
@@ -187,9 +200,9 @@ do
   -- An unbind naming "SUPER + 1" matches nothing, leaves the default in place,
   -- and then BOTH bindings fire on one press.
   check({ label = "desktop 1 unbinds code:10", got = unbound:find("SUPER + code:10", 1, true) ~= nil, want = true })
-  -- Ten keys cleared even with eight desktops, or SUPER+9 stays bound to a
-  -- flat workspace and splits the desk.
-  check({ label = "the 9 and 0 keys are cleared too", got = unbound:find("SUPER + code:19", 1, true) ~= nil, want = true })
+  -- All ten keys cleared for nine desktops, or SUPER+0 stays bound to a flat
+  -- workspace 10 and splits the desk.
+  check({ label = "the 0 key is cleared too", got = unbound:find("SUPER + code:19", 1, true) ~= nil, want = true })
   check({ label = "no unbind names a bare digit", got = unbound:find("SUPER %+ %d") == nil, want = true })
   check({ label = "the monitor-hopping TAB is unbound", got = unbound:find("SUPER + TAB", 1, true) ~= nil, want = true })
   check({ label = "desktop 1 is bound", got = recorder.bound["SUPER + code:10"], want = "Focus desktop 1" })
@@ -206,7 +219,7 @@ do
   check({ label = "SUPER+right too", got = recorder.bound["SUPER + RIGHT"], want = "Next desktop" })
 
   check({ label = "SUPER+SHIFT+1 flings a window there", got = recorder.bound["SUPER + SHIFT + code:10"], want = "Send window to desktop 1" })
-  check({ label = "and the tenth desktop is on code:19", got = recorder.bound["SUPER + code:19"], want = "Focus desktop 10" })
+  check({ label = "and the ninth desktop is on code:18", got = recorder.bound["SUPER + code:18"], want = "Focus desktop 9" })
   check({ label = "SUPER+SHIFT+left flings it one along", got = recorder.bound["SUPER + SHIFT + LEFT"], want = "Send window to the previous desktop" })
   check({ label = "SUPER+SHIFT+right too", got = recorder.bound["SUPER + SHIFT + RIGHT"], want = "Send window to the next desktop" })
 
@@ -234,9 +247,9 @@ do
   check({ label = "top desktop 5 -> top desktop 6 (16)", got = recorder.dispatched[1].options.workspace, want = "16" })
 
   -- And it wraps, from the window's own desktop.
-  local wrap, wrap_recorder = fresh_peach({ active_window = { workspace = { id = 10 } } })
+  local wrap, wrap_recorder = fresh_peach({ active_window = { workspace = { id = 9 } } })
   wrap.send_active_window_to_relative_desktop({ step = 1, follow = false })
-  check({ label = "bottom desktop 10 wraps to desktop 1", got = wrap_recorder.dispatched[1].options.workspace, want = "1" })
+  check({ label = "bottom desktop 9 wraps to desktop 1", got = wrap_recorder.dispatched[1].options.workspace, want = "1" })
 end
 
 -- --------------------------------------------------------------------------
@@ -360,11 +373,11 @@ do
   local peach, recorder = fresh_peach({ active_workspace = { id = 1 } })
   peach.step_desktop({ step = -1 })
   -- Lua's % is non-negative for a positive divisor, so this needs no special case.
-  check({ label = "stepping back off desktop 1 wraps to 10", got = recorder.dispatched[2].options.workspace, want = "10" })
+  check({ label = "stepping back off desktop 1 wraps to 9", got = recorder.dispatched[2].options.workspace, want = "9" })
 
-  local wrap_peach, wrap_recorder = fresh_peach({ active_workspace = { id = 10 } })
+  local wrap_peach, wrap_recorder = fresh_peach({ active_workspace = { id = 9 } })
   wrap_peach.step_desktop({ step = 1 })
-  check({ label = "stepping past desktop 10 wraps to 1", got = wrap_recorder.dispatched[2].options.workspace, want = "1" })
+  check({ label = "stepping past desktop 9 wraps to 1", got = wrap_recorder.dispatched[2].options.workspace, want = "1" })
 
   -- A scratchpad has no desktop to bring the other panels to.
   local special_peach, special_recorder = fresh_peach({ active_workspace = { id = -99 } })

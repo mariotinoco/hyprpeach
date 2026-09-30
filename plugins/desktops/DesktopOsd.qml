@@ -5,7 +5,6 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
-import "Switches.js" as Switches
 
 // A big number, in the middle of every screen, when the desktop changes.
 //
@@ -17,44 +16,6 @@ import "Switches.js" as Switches
 // click even while it is on screen.
 Item {
   id: root
-
-  // HOW WIDE EACH MONITOR'S BAND IS, WHICH IS THE DESKTOP COUNT.
-  //
-  // Counted rather than configured: hyprpeach makes every desktop persistent,
-  // so a monitor's workspaces are exactly its desktops, and a setting would be
-  // a second place for that number to go stale.
-  //
-  // But it is only believed when every monitor agrees. hyprpeach gives each
-  // monitor the same number of workspaces, always -- so a reading where they
-  // differ is a model caught half-updated, not a new desktop count. Trusting
-  // those readings meant the count changed for a frame or two during a switch,
-  // which moved every desktop number with it: marks appearing, changing and
-  // vanishing again mid-switch, and a re-render each time. It is the last
-  // value that stood up to this test, never a transient one.
-  property int bandStride: 10
-
-  function refreshBandStride() {
-    var perMonitor = ({})
-    var values = Hyprland.workspaces.values
-    for (var index = 0; index < values.length; index++) {
-      var workspace = values[index]
-      if (workspace.id < 1 || !workspace.monitor) continue
-      var name = workspace.monitor.name
-      perMonitor[name] = (perMonitor[name] || 0) + 1
-    }
-
-    var agreed = -1
-    for (var key in perMonitor) {
-      if (agreed < 0) agreed = perMonitor[key]
-      else if (perMonitor[key] !== agreed) return   // half-updated; keep what we had
-    }
-    if (agreed > 0) root.bandStride = agreed
-  }
-
-  Connections {
-    target: Hyprland.workspaces
-    function onValuesChanged() { root.refreshBandStride() }
-  }
 
   // WHICH PANELS ARE BEING HELD, AND ON WHAT.
   //
@@ -128,60 +89,26 @@ Item {
   property int desktop: -1
   property int fadeMilliseconds: 200
 
-  readonly property int focusedWorkspaceId: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
-  readonly property string focusedMonitorName: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.monitor
-    ? String(Hyprland.focusedWorkspace.monitor.name || "") : ""
-
-  // Each monitor's last workspace, and the desktop the desk is on: what
-  // Switches.observe needs to tell a switch from a focus move. See Switches.js.
-  property var switches: ({ workspaceByMonitor: ({}), desktop: -1 })
-
-  function desktopFor(workspaceId) {
-    return Switches.desktopFor(workspaceId, root.bandStride)
-  }
-
-  // SEEDED FROM HYPRCTL, not from Quickshell's own per-monitor workspace, which
-  // is stale for every monitor but the focused one -- and seeding a monitor
-  // with the wrong workspace makes the first visit to it look like a switch.
-  // Nothing flashes before this lands: a monitor not yet known is not news.
-  Process {
-    running: true
-    command: ["hyprctl", "-j", "monitors"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var monitors = JSON.parse(text)
-          var workspaceByMonitor = ({})
-          var desktop = -1
-          for (var index = 0; index < monitors.length; index++) {
-            var monitor = monitors[index]
-            if (!monitor.activeWorkspace) continue
-            workspaceByMonitor[monitor.name] = monitor.activeWorkspace.id
-            if (monitor.focused) desktop = root.desktopFor(monitor.activeWorkspace.id)
-          }
-          root.refreshBandStride()
-          root.switches = { workspaceByMonitor: workspaceByMonitor, desktop: desktop }
-          if (desktop > 0) root.desktop = desktop
-        } catch (error) {
-          // Unseeded: every monitor counts as unseen until focus visits it,
-          // so the cost is one quiet visit each, never a false flash.
-        }
-      }
+  // A DESK SWITCH IS ANNOUNCED BY THE LIBRARY, ONCE, AND THIS LISTENS.
+  //
+  // It used to be inferred from the focused workspace, and focus moves for
+  // reasons that are not switches: with one panel held, the monitors show
+  // different desktops, so the mouse crossing between them read as a switch
+  // and flashed a number when nothing had moved. peach.focus_desktop fires
+  // `hyprpeach-desktop,N` after every paired switch -- however it was asked
+  // for: a key, a click on the strip, a script -- and only then.
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name !== "custom") return
+      var data = String(event.data || "")
+      if (data.indexOf("hyprpeach-desktop,") !== 0) return
+      var next = parseInt(data.substring("hyprpeach-desktop,".length), 10)
+      if (!(next > 0)) return
+      root.desktop = next
+      root.opened = true
+      hideTimer.restart()
     }
-  }
-
-  onFocusedWorkspaceIdChanged: {
-    var result = Switches.observe(root.switches, {
-      monitorName: root.focusedMonitorName,
-      workspaceId: root.focusedWorkspaceId,
-      bandStride: root.bandStride
-    })
-    root.switches = result.state
-    if (!result.flash) return
-    root.desktop = result.state.desktop
-    root.opened = true
-    hideTimer.restart()
   }
 
   Timer {
@@ -288,7 +215,7 @@ Item {
         Text {
           id: numeral
           anchors.centerIn: parent
-          text: root.desktop > 0 ? (root.desktop === 10 ? "0" : String(root.desktop)) : ""
+          text: root.desktop > 0 ? String(root.desktop) : ""
 
           color: Util.alpha(Color.foreground, root.fillOpacity)
           font.family: Style.font.family

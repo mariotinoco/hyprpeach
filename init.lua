@@ -32,13 +32,24 @@ local peach = {}
 --- keys muscle memory expects, and the additions sit on chords checked against
 --- Omarchy's defaults. Only `monitors_bottom_to_top` has no sensible default,
 --- because nobody else knows what is on your desk.
-local DEFAULTS = {
-  --- How many desktops, and therefore how wide each monitor's band of
-  --- workspace IDs is -- they are the same number because a band holds exactly
-  --- one workspace per desktop. Ten desktops puts the bottom monitor on
-  --- workspaces 1-10 and the next one up on 11-20.
-  desktop_count = 10,
+--- NINE DESKTOPS: A 3 x 3, AND NOT A SETTING.
+---
+--- The desk is a torus. Columns are bearings around the station, rows are
+--- positions around its orbit, and both wrap -- so every step, 3 -> 4 and
+--- 9 -> 1 included, is the same move. The overview draws that grid and the
+--- orbit scene flies that path; a desk of seven or twelve desktops has neither,
+--- so the number is fixed here rather than offered as an option somebody could
+--- set and quietly break both. `0` is not a tenth desktop: it opens the overview.
+local DESKTOP_COUNT = 9
 
+--- WHY EACH MONITOR'S BAND IS STILL TEN WORKSPACES WIDE. 2.x had ten desktops,
+--- so the bottom panel owned workspaces 1-10 and the next one up 11-20. Keeping
+--- the band at ten keeps every window's workspace number where it was: the
+--- bottom panel's desktop 3 is still workspace 3, the top panel's still 13.
+--- The tenth workspace of each band is simply no longer a desktop.
+local BAND_WIDTH = 10
+
+local DEFAULTS = {
   --- WHETHER YOUR VIEW FOLLOWS A WINDOW YOU FLING.
   ---
   --- Named after `focus follows mouse`, and true for the same reason: the
@@ -130,7 +141,6 @@ local STOCK_WORKSPACE_CHORDS = {
 
 --- Populated by `setup`. Nothing here is written anywhere else.
 local state = {
-  desktop_count = nil,
   --- Bottom-to-top. A paired switch walks this BACKWARDS so the bottom panel
   --- switches last and therefore keeps the focus; on a desk with stacked
   --- monitors the bottom one is at eye level.
@@ -159,7 +169,7 @@ end
 --- Which band — which monitor, as a 1-based index into `state.bands` — a
 --- workspace ID belongs to.
 local function band_index_of_workspace(parameters)
-  return math.floor((parameters.workspace_id - 1) / state.desktop_count) + 1
+  return math.floor((parameters.workspace_id - 1) / BAND_WIDTH) + 1
 end
 
 --- The workspace ID that shows `desktop` on the band at `band_index`.
@@ -175,8 +185,8 @@ local function desktop_of_workspace(parameters)
   local workspace_id = parameters.workspace_id
   if workspace_id < 1 then return nil end
   if state.bands[band_index_of_workspace({ workspace_id = workspace_id })] == nil then return nil end
-  local desktop = ((workspace_id - 1) % state.desktop_count) + 1
-  if desktop > state.desktop_count then return nil end
+  local desktop = ((workspace_id - 1) % BAND_WIDTH) + 1
+  if desktop > DESKTOP_COUNT then return nil end
   return desktop
 end
 
@@ -262,23 +272,6 @@ end
 --- Hyprland reload clears the file at the same moment it clears the memory and
 --- the two cannot drift apart.
 local HELD_PANELS_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/hyprpeach-held-panels"
-
---- How many desktops there are, for the overview to draw.
----
---- The overview shows each monitor the band it is on, and a band is exactly
---- this many workspaces. It cannot be counted from the compositor: on a laptop
---- taken off its dock, the external monitors' workspaces pile onto the one
---- panel left, and counting that panel's workspaces gives three bands' worth.
---- Published beside the held panels, by the same idiom, rewritten on every
---- setup.
-local DESKTOP_COUNT_PATH = (os.getenv("XDG_RUNTIME_DIR") or "/tmp") .. "/hyprpeach-desktop-count"
-
-local function publish_desktop_count()
-  local file = io.open(DESKTOP_COUNT_PATH, "w")
-  if file == nil then return end
-  file:write(tostring(state.desktop_count), "\n")
-  file:close()
-end
 
 --- One held panel per line: the monitor's name, a space, and the desktop it is
 --- holding.
@@ -381,6 +374,12 @@ function peach.focus_desktop(parameters)
     end
   end
   realign_pinned_windows()
+  -- ANNOUNCED, not left to be inferred. Everything that reacts to the desk --
+  -- the number on screen, the overview, the orbit scene -- hears this one event
+  -- per switch. Reading switches off the focused workspace instead mistook
+  -- focus moving between two monitors for a switch whenever they showed
+  -- different desktops, which a held panel makes the normal case.
+  hl.dispatch(hl.dsp.event("hyprpeach-desktop," .. parameters.desktop))
 end
 
 --- Step the desktop by `step`, wrapping at both ends. Lua's `%` is
@@ -389,7 +388,7 @@ end
 function peach.step_desktop(parameters)
   local current = moving_desktop() or peach.current_desktop()
   if current == nil then return end
-  peach.focus_desktop({ desktop = ((current - 1 + parameters.step) % state.desktop_count) + 1 })
+  peach.focus_desktop({ desktop = ((current - 1 + parameters.step) % DESKTOP_COUNT) + 1 })
 end
 
 --- Return to the desktop you were on before this one. Hyprland remembers the
@@ -485,7 +484,7 @@ function peach.send_active_window_to_relative_desktop(parameters)
   if desktop == nil then return end
   send_window_to_desktop({
     window = window,
-    desktop = ((desktop - 1 + parameters.step) % state.desktop_count) + 1,
+    desktop = ((desktop - 1 + parameters.step) % DESKTOP_COUNT) + 1,
     follow = parameters.follow,
   })
 end
@@ -654,7 +653,7 @@ end
 --- `default` brings every panel up on desktop 1 at login.
 local function create_workspace_rules()
   for _, band in ipairs(state.bands) do
-    for desktop = 1, state.desktop_count do
+    for desktop = 1, DESKTOP_COUNT do
       hl.workspace_rule({
         workspace = tostring(band.workspace_band_start + desktop),
         monitor = band.monitor,
@@ -676,10 +675,10 @@ local function unbind_conflicting_defaults(parameters)
   -- both here and by the stock configs, because a keycode survives a keyboard
   -- layout change. An unbind naming `SUPER + 1` matches nothing, leaves the
   -- default in place, and then BOTH bindings fire on one press.
-  -- The stock number row is TEN keys whatever `desktop_count` is. Clearing
-  -- only as many as there are desktops would leave the rest bound to flat
-  -- workspaces -- with eight desktops, SUPER+9 would still jump to a ninth
-  -- workspace on one panel and split the desk, and nothing would report it.
+  -- The stock number row is TEN keys and there are nine desktops. Clearing
+  -- only nine would leave SUPER+0 bound to a flat workspace 10 on one panel,
+  -- splitting the desk with nothing to report it; it is cleared with the rest
+  -- and bound below to the overview.
   for keyIndex = 1, 10 do
     local keycode = "code:" .. tostring(keyIndex + 9)
     for _, modifier in ipairs(STOCK_NUMBER_ROW_MODIFIERS) do
@@ -719,7 +718,7 @@ local function create_bindings(parameters)
     return modifier .. " + " .. keycode
   end
 
-  for desktop = 1, state.desktop_count do
+  for desktop = 1, DESKTOP_COUNT do
     local keycode = "code:" .. tostring(desktop + 9)
 
     bind(on_number_row(keys.focus_desktop_modifier, keycode), function()
@@ -738,6 +737,9 @@ local function create_bindings(parameters)
       peach.send_active_window_to_desktop({ desktop = desktop, follow = true })
     end, "Send window to desktop " .. desktop .. " and follow it")
   end
+
+  -- `0`, the key after the last desktop, is the whole grid: the overview.
+  bind(on_number_row(keys.focus_desktop_modifier, "code:19"), function() peach.toggle_overview() end, "Every desktop at once")
 
   local function step(amount)
     return function() peach.step_desktop({ step = amount }) end
@@ -802,14 +804,15 @@ function peach.setup(options)
     return DEFAULTS[key]
   end
 
-  local desktop_count = chosen("desktop_count")
+  if options.desktop_count ~= nil then
+    refuse({ reason = "desktop_count is gone: hyprpeach has nine desktops, a 3 x 3, and SUPER + 0 opens the overview. Remove desktop_count from setup()." })
+  end
 
-  state.desktop_count = desktop_count
   state.focus_follows_fling = chosen("focus_follows_fling")
   state.notify = chosen("notify")
   state.bands = {}
   for index, monitor in ipairs(options.monitors_bottom_to_top) do
-    state.bands[index] = { monitor = monitor, workspace_band_start = (index - 1) * desktop_count, held = false }
+    state.bands[index] = { monitor = monitor, workspace_band_start = (index - 1) * BAND_WIDTH, held = false }
   end
 
   -- Merged per key, not wholesale: overriding one chord should not silently
@@ -827,7 +830,6 @@ function peach.setup(options)
   -- says. A reload that cleared the memory and left a stale file behind would
   -- have the bar drawing a lock on a panel that moves.
   publish_held_panels()
-  publish_desktop_count()
 
   create_workspace_rules()
   if chosen("unbind_conflicting_defaults") then unbind_conflicting_defaults({ keys = keys }) end

@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v2.1.1 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v3.0.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v2.1.1`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.0.0`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -99,7 +99,6 @@ require("hyprpeach").setup({
   },
 
   -- Everything below is a default. Delete any line to keep it.
-  desktop_count               = 10,    -- and so how wide each monitor's band is
   focus_follows_fling         = true,  -- your view lands with a window you fling
   notify                      = true,  -- a toast for actions with no on-screen result
   unbind_conflicting_defaults = true,  -- clear stock bindings that move one panel
@@ -148,7 +147,7 @@ omarchy plugin disable omarchy.menu
 omarchy bar position left
 ```
 
-The bar goes **vertical** because the strip is a column of ten cells: on a horizontal bar they spend width competing with the clock and the tray, and a desk this model is for is wide. It is the one line here that is a preference rather than a consequence — `omarchy bar position top` (or `bottom`, or `right`) puts it back, and only adding desktops again will move it.
+The bar goes **vertical** because the strip is a column of nine cells: on a horizontal bar they spend width competing with the clock and the tray, and a desk this model is for is wide. It is the one line here that is a preference rather than a consequence — `omarchy bar position top` (or `bottom`, or `right`) puts it back, and only adding desktops again will move it.
 
 Both widgets are displaced rather than merely unused. `omarchy.workspaces` [cannot draw a hyprpeach desk](#the-bar-strip) at all. `omarchy.menu` is the widget ahead of the strip in the left section, and the strip is built to lead it — it reaches out to line its first tile up with the edge of a tiled window, which is only the right place to be when nothing sits in front of it. The menu is still one keypress away on `SUPER`.
 
@@ -164,10 +163,10 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 2.1.1
-  🍑 desktops     2.1.1    added            Multi-Monitor Desktops
+🍑 hyprpeach 3.0.0
+  🍑 desktops     3.0.0    added            Multi-Monitor Desktops
   🌱 dev-ports    0.1.0    not added        Local Ports
-  🌱 overview     0.1.0    not added        Desktop Overview
+  🌱 overview     0.2.0    not added        Desktop Overview
 
 $ hyprpeach plugin add dev-ports
 $ hyprpeach plugin remove desktops
@@ -214,7 +213,7 @@ Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.1
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.0
 hyprctl reload
 ```
 
@@ -226,7 +225,7 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.1
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.0
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add dev-ports
 ```
@@ -347,7 +346,7 @@ Stock Omarchy bindings, given up on purpose: on a two-panel desk the desktop str
 
 ### Off by default
 
-`SUPER + SHIFT + TAB`, `SUPER + CTRL + TAB`, `SUPER + scroll` and `SUPER + SHIFT + ALT + 1…0` are bound to nothing — the table above already covers the day. Name a chord for any of them in [`keys`](#install) to bring it back.
+`SUPER + SHIFT + TAB`, `SUPER + CTRL + TAB`, `SUPER + scroll` and `SUPER + SHIFT + ALT + 1…9` are bound to nothing — the table above already covers the day. Name a chord for any of them in [`keys`](#install) to bring it back.
 
 > [!IMPORTANT]
 > Their **stock** bindings are cleared regardless, and so is the whole ten-key number row even when you have fewer desktops. A chord hyprpeach declines to bind is not a chord that falls silent — it is the stock one, still live, still moving a single panel.
@@ -444,7 +443,7 @@ Every term is an integer of logical pixels — `Style.gapsOut * 2`, `Style.space
 > [!NOTE]
 > The tiles keep a proportional corner radius rather than `Style.cornerRadius`. That token mirrors `decoration:rounding`, which is `0` on plenty of setups — matching it would make the tiles square.
 
-Desktop 10 is drawn as **`0`**, because that is the key you press for it — and it keeps every numeral one character wide, so it sits inside a circle instead of straining against one.
+There are **nine desktops, a 3 × 3**, and `SUPER + 0` is not a tenth: it opens [the overview](plugins/overview/README.md), the whole grid at once. The number is fixed rather than a setting, because the overview and the orbit scene are both built on that grid.
 
 <br>
 

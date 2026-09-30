@@ -43,18 +43,16 @@ BarWidget {
   id: root
   moduleName: "hyprpeach.desktops"
 
-  // HOW WIDE EACH MONITOR'S BAND IS, WHICH IS THE DESKTOP COUNT.
-  //
-  // Counted rather than configured: hyprpeach makes every desktop persistent,
-  // so a monitor's workspaces are exactly its desktops, and a setting would be
-  // a second place for that number to go stale -- which it did, drawing ten
-  // cells for an eight-desktop desk.
-  //
-  // Only believed when every monitor agrees. hyprpeach gives each monitor the
-  // same number of workspaces, always, so a reading where they differ is a
-  // model caught half-updated rather than a new desktop count. Trusting those
-  // readings made cells appear and vanish mid-switch.
-  property int bandStride: 10
+  // NINE DESKTOPS, ON BANDS TEN WORKSPACES WIDE. Both are fixed in the library
+  // (init.lua says why): nine is the 3 x 3 the overview and the orbit scene are
+  // built on, and ten keeps every workspace number where 2.x put it.
+  readonly property int desktopCount: 9
+  readonly property int bandWidth: 10
+  function desktopOf(workspaceId) {
+    if (workspaceId < 1) return -1
+    var desktop = ((workspaceId - 1) % root.bandWidth) + 1
+    return desktop > root.desktopCount ? -1 : desktop
+  }
 
   // WHETHER THIS PARTICULAR PANEL IS BEING HELD.
   //
@@ -101,38 +99,13 @@ BarWidget {
     onLoadFailed: root.heldPanels = ({})
   }
 
-  function refreshBandStride() {
-    var perMonitor = ({})
-    var values = Hyprland.workspaces.values
-    for (var index = 0; index < values.length; index++) {
-      var workspace = values[index]
-      if (workspace.id < 1 || !workspace.monitor) continue
-      var name = workspace.monitor.name
-      perMonitor[name] = (perMonitor[name] || 0) + 1
-    }
-
-    var agreed = -1
-    for (var key in perMonitor) {
-      if (agreed < 0) agreed = perMonitor[key]
-      else if (perMonitor[key] !== agreed) return   // half-updated; keep what we had
-    }
-    if (agreed > 0) root.bandStride = agreed
-  }
-
-  Component.onCompleted: root.refreshBandStride()
-
-  Connections {
-    target: Hyprland.workspaces
-    function onValuesChanged() { root.refreshBandStride() }
-  }
-
-  // Every desktop is persistent, so the desktops ARE 1..bandStride. Deriving
+  // Every desktop is persistent, so the desktops ARE 1..desktopCount. Deriving
   // the list by scanning the live workspaces instead let it lose an entry for a
   // frame whenever the model was between updates, and a cell that disappears
   // and comes back is the most distracting thing a status bar can do.
   readonly property var desktops: {
     var list = []
-    for (var desktop = 1; desktop <= root.bandStride; desktop++) list.push(desktop)
+    for (var desktop = 1; desktop <= root.desktopCount; desktop++) list.push(desktop)
     return list
   }
 
@@ -143,8 +116,8 @@ BarWidget {
     var values = Hyprland.workspaces.values
     for (var index = 0; index < values.length; index++) {
       var workspace = values[index]
-      if (workspace.id < 1) continue
-      var desktop = ((workspace.id - 1) % root.bandStride) + 1
+      var desktop = root.desktopOf(workspace.id)
+      if (desktop < 1) continue
       counts[desktop] = (counts[desktop] || 0) + workspace.toplevels.values.length
     }
     return counts
@@ -168,7 +141,7 @@ BarWidget {
   function activeDesktop() {
     if (root.held && root.heldDesktop >= 1) return root.heldDesktop
     if (!Hyprland.focusedWorkspace || Hyprland.focusedWorkspace.id < 1) return -1
-    return ((Hyprland.focusedWorkspace.id - 1) % root.bandStride) + 1
+    return root.desktopOf(Hyprland.focusedWorkspace.id)
   }
 
   // `hyprctl eval`, NOT `hyprctl dispatch`. Dispatch wraps its argument in
@@ -400,7 +373,7 @@ BarWidget {
           // numeral one character wide, so it sits in a circle instead of
           // straining against one.
           // The held tile carries the lock instead of its numeral.
-          text: lockMark.visible ? "" : (cell.modelData === 10 ? "0" : String(cell.modelData))
+          text: lockMark.visible ? "" : String(cell.modelData)
           // The invert: on the near-solid tile the numeral drops to the bar's
           // own background, so the pair is one ink with its roles swapped.
           // Empty and occupied are the same ink again, further down.
