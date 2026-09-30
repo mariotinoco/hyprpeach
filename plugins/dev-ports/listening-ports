@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""Everything the ports panel reads, and the one thing it writes.
+
+    listening-ports list
+    listening-ports signal <pid> <process-name> TERM|KILL
+
+`list` prints one JSON object on stdout. `signal` prints one line and exits
+non-zero when it refused, so the panel can show the refusal verbatim instead of
+guessing why nothing died.
+
+WHY A SCRIPT AND NOT QML. A Quickshell `Process` runs one command, so doing this
+in the panel would cost one subprocess per listening PID per refresh just to
+read /proc — 39 sockets and 11 distinct owners on the desk this was written on.
+One process that does the whole join is a single spawn whatever the socket count,
+and JSON is the boundary format the rest of this shell already speaks
+(`hyprctl -j`, `omarchy plugin list --json`).
+
+WHY PYTHON AND NOT BASH. `signal` needs pidfd_open(2), which has no shell
+equivalent — see signal_process() for why nothing weaker is correct. Writing the
+read half in a second language to keep the write half in Python buys nothing;
+one file in one language is the whole surface.
+"""
+
+import json
+import os
+import pwd
+import re
+import signal as signal_module
+import subprocess
+import sys
+
+# `ss -e`, NOT PLAIN `ss -p`, AND THE REASON IS THE PORTS YOU DO NOT OWN.
+#
+# Without root, `ss -p` prints no `users:(...)` for another user's socket: the
+# port is visible and its owner is not. Measured on this desk, 22, 53, 631 and
+# 6742 all came back bare — most of the low-numbered ports, and a panel that
+# renders four rows of "unknown" has told the reader nothing.
+#
+# `-e` adds `cgroup:`, which needs no privilege and names the unit that opened
+# the socket: `/system.slice/sshd.service`, `/system.slice/cups.service`,
+# `/system.slice/systemd-resolved.service`. So a port whose PID is hidden still
+# gets a name a person recognises, and the stop button can be honestly refused
+# instead of offered against a PID that was never read.
+#
+# `-e` also carries `uid:`, and its ABSENCE is the reading that matters: the
+# kernel omits the field for uid 0, so a socket with no `uid:` belongs to root.
+SOCKET_QUERIES = {
+    "tcp": ["ss", "--tcp", "--listening", "--numeric", "--processes", "--extended", "--no-header"],
+    "udp": ["ss", "--udp", "--listening", "--numeric", "--processes", "--extended", "--no-header"],
+}
+
+# `ss` PRINTS A PROCESS NAME THAT CANNOT BE PARSED BY ITS PUNCTUATION.
+#
+# The name is the kernel's `comm`, so it is at most 15 characters, and it is
+# neither escaped nor balanced. Measured live, the process this whole widget
+# exists to find printed as:
+#
+#     users:(("next-server (v1",pid=2388920,fd=22))
+#
+# — a space and an unmatched `(` inside the quotes, because "next-server
+# (v15.2.4)" was cut at 15. Splitting on `(`, `)` or `,` mangles exactly the kind
+# of process a person is looking for. The quotes are the only delimiter the
+# kernel cannot put inside a comm, so this matches on them and nothing else.
+PROCESS_TRIPLE = re.compile(r'"([^"]*)",pid=(\d+),fd=\d+')
+OWNER_USER_ID = re.compile(r"\buid:(\d+)\b")
+CONTROL_GROUP = re.compile(r"\bcgroup:(\S+)")
+
+# A port on 0.0.0.0, :: or * is reachable from the network; a port on 127.0.0.1
+# is not. That is the difference between a dev server you forgot about and a dev
+# server the coffee shop can reach, and it is the one fact about a listening
+# socket that can hurt you — so the panel ranks it and the bar icon reports it.
+NETWORK_ADDRESSES = {"*", "0.0.0.0", "[::]", "::"}
+
+# Ports the panel will not offer to stop however they are owned. Killing PID 1
+# ends the session; killing the shell's own process takes the panel down with
+# it, which looks exactly like a crash.
+UNSTOPPABLE_PROCESS_IDS = {0, 1}
+
+EPHEMERAL_RANGE_PATH = "/proc/sys/net/ipv4/ip_local_port_range"
+DEFAULT_EPHEMERAL_RANGE = (32768, 60999)
+
+
+def ephemeral_range():
+    """The range a port can be IN without anybody having chosen it.
+
+    Something asked bind() for port 0 and the kernel picked a number. This desk
+    reported 32768-60999 and had 23 of its 33 listening ports inside it, twenty
+    of those one Node process's worker threads. Sorting them in with the port
+    somebody actually typed buries it, so the panel folds them away and says how
+    many it folded.
+
+    Read rather than assumed: the default is near-universal but it is a sysctl,
+    and a desk that has tuned it should get its own answer, not this file's.
+    """
+    try:
+        with open(EPHEMERAL_RANGE_PATH, "r") as handle:
+            low, high = handle.read().split()[:2]
+        return (int(low), int(high))
+    except (OSError, ValueError):
+        return DEFAULT_EPHEMERAL_RANGE
+
+
+def split_local_address(field):
+    """`127.0.0.1:3002` / `[::]:3002` / `127.0.0.53%lo:53` -> (address, port).
+
+    The port is after the LAST colon, never the first: an IPv6 address arrives
+    bracketed and full of them, and may carry a `%interface` suffix besides.
+    """
+    separator = field.rfind(":")
+    if separator < 1:
+        return ("", 0)
+    try:
+        return (field[:separator], int(field[separator + 1:]))
+    except ValueError:
+        return ("", 0)
+
+
+def unit_name(control_group):
+    """The systemd unit that opened the socket, from its cgroup path.
+
+    Only a `*.service` is kept. A user-slice cgroup ends in a scope name
+    (`app-Hyprland-xdg\\x2dterminal\\x2dexec-c6b058d8.scope`) which names the
+    terminal a process happens to have been launched from — noise in a list
+    whose whole job is telling processes apart.
+    """
+    leaf = control_group.rstrip("/").rsplit("/", 1)[-1]
+    return leaf if leaf.endswith(".service") else ""
+
+
+def command_line(process_id):
+    """The full argv, which is the only label that tells Node processes apart.
+
+    `comm` is 15 characters, so the panel's primary label is regularly a word
+    and a half — "node-MainThread", "next-server (v1". /proc/<pid>/cmdline is
+    what identifies WHICH of eight Node processes is the one you started.
+
+    A PID that exited between `ss` and here has no /proc entry and gets the
+    empty string, the same as a port whose owner was never visible.
+    """
+    try:
+        with open("/proc/%d/cmdline" % process_id, "rb") as handle:
+            return handle.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+
+
+# WHICH CHECKOUT A DEV SERVER IS RUNNING FROM IS THE QUESTION A DEVELOPER ASKS.
+#
+# "workerd on 8797" does not say which of five worktrees left it running; the
+# branch does. And the working directory turned out to be a clean line between
+# the two kinds of thing that listen on a developer's machine. Measured on the
+# desk this was written on: every dev server -- Next.js, Wrangler's workerd, a
+# Bun service -- had its cwd inside a git checkout, and every application --
+# Steam, Discord, Chrome, JetBrains Toolbox -- had its cwd in $HOME or an install
+# directory. So the same fact that names the branch also sorts the list.
+#
+# One `git rev-parse` per distinct directory, not per socket: nine dev sockets
+# on that desk came from three directories. Only ever for the reader's own
+# processes, because /proc/<pid>/cwd of anybody else's is unreadable anyway.
+#
+# `core.fsmonitor=false` and GIT_OPTIONAL_LOCKS=0 because this runs git inside
+# a directory the panel did not choose, on a timer. It should read, and nothing
+# else -- no helper process, no lock taken on somebody's index mid-build.
+def git_context(working_directory, cache):
+    if working_directory in cache:
+        return cache[working_directory]
+    context = {"repositoryName": "", "worktreeName": "", "branchName": "", "projectPath": ""}
+    cache[working_directory] = context
+    if not os.path.isdir(working_directory):
+        return context
+    try:
+        result = subprocess.run(
+            ["git", "-c", "core.fsmonitor=false", "-C", working_directory,
+             "rev-parse", "--path-format=absolute",
+             "--show-toplevel", "--git-common-dir", "--git-dir", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=3, check=False,
+            env=dict(os.environ, GIT_OPTIONAL_LOCKS="0"),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return context
+    lines = result.stdout.splitlines()
+    if result.returncode != 0 or len(lines) < 4:
+        return context
+    top_level, common_directory, git_directory, branch = lines[:4]
+
+    # The repository is named by where its objects live, not by the checkout:
+    # a worktree's top level is `worktrees/bonsai/concierge-report-full-funnel`,
+    # and its common directory is `bonsai/.git` -- or `bonsai.git`, bare.
+    common_directory = os.path.normpath(common_directory)
+    if os.path.basename(common_directory) == ".git":
+        repository = os.path.basename(os.path.dirname(common_directory))
+    else:
+        repository = os.path.basename(common_directory)
+        if repository.endswith(".git"):
+            repository = repository[: -len(".git")]
+
+    is_linked_worktree = common_directory != os.path.normpath(git_directory)
+    relative = os.path.relpath(working_directory, top_level)
+    context.update({
+        "repositoryName": repository,
+        "worktreeName": os.path.basename(top_level) if is_linked_worktree else "",
+        "branchName": branch if branch != "HEAD" else "detached",
+        "projectPath": "" if relative == "." else relative,
+    })
+    return context
+
+
+def working_directory(process_id):
+    try:
+        return os.readlink("/proc/%d/cwd" % process_id)
+    except OSError:
+        return ""
+
+
+def user_name(user_id):
+    try:
+        return pwd.getpwuid(user_id).pw_name
+    except KeyError:
+        return "uid %d" % user_id
+
+
+# /etc/services IS ONLY BELIEVED BELOW 1024, AND THE MEASUREMENT IS THE REASON.
+#
+# Naming a well-known port is borrowed from portop (see README.md) and it
+# earns its place at the bottom of the range: 22 reads as `ssh`, 631 as `ipp`,
+# 53 as `domain`, and a reader recognises those before they have read the
+# process. Above 1024 the same file is 300 KB of IANA registrations that have
+# nothing to do with what is running. Measured on this desk with the whole file
+# trusted: the Next.js dev server this widget was built to find was labelled
+# `exlm-agent`, and a Bun server on 1337 was labelled `menandmice-dns`. A
+# confidently wrong name is worse than a blank, because the reader believes it.
+WELL_KNOWN_PORT_CEILING = 1024
+
+
+def port_name(port, protocol):
+    if port >= WELL_KNOWN_PORT_CEILING:
+        return ""
+    try:
+        import socket
+        return socket.getservbyport(port, protocol)
+    except (OSError, OverflowError, ValueError):
+        return ""
+
+
+def read_sockets():
+    """Every listening socket, one record per protocol+port+PID.
+
+    One socket can list several (name, pid, fd) triples and one process commonly
+    holds one port on several addresses, so both collapse here. When the same
+    process holds one port on several addresses the WIDEST wins: whether the
+    port is reachable from the network matters more to the reader than which row
+    `ss` happened to print first.
+    """
+    ephemeral_low, ephemeral_high = ephemeral_range()
+    own_user_id = os.getuid()
+    records = {}
+    order = []
+    unavailable = []
+
+    for protocol, query in SOCKET_QUERIES.items():
+        try:
+            output = subprocess.run(
+                query, capture_output=True, text=True, timeout=10, check=False,
+            ).stdout
+        except (OSError, subprocess.SubprocessError) as error:
+            unavailable.append("%s: %s" % (protocol, error))
+            continue
+
+        for line in output.splitlines():
+            fields = line.split(None, 4)
+            if len(fields) < 5:
+                continue
+            address, port = split_local_address(fields[3])
+            if port <= 0:
+                continue
+
+            owner_match = OWNER_USER_ID.search(line)
+            owner_user_id = int(owner_match.group(1)) if owner_match else 0
+            control_group = CONTROL_GROUP.search(line)
+            unit = unit_name(control_group.group(1)) if control_group else ""
+
+            owners = PROCESS_TRIPLE.findall(line) or [("", "0")]
+            for process_name, process_id_text in owners:
+                process_id = int(process_id_text)
+                key = (protocol, port, process_id)
+                if key in records:
+                    existing = records[key]
+                    if address in NETWORK_ADDRESSES and existing["address"] not in NETWORK_ADDRESSES:
+                        existing["address"] = address
+                        existing["isNetworkReachable"] = True
+                    continue
+
+                records[key] = {
+                    "protocol": protocol,
+                    "port": port,
+                    "address": address,
+                    "isNetworkReachable": address in NETWORK_ADDRESSES,
+                    "portName": port_name(port, protocol),
+                    "processId": process_id,
+                    "processName": process_name,
+                    "commandLine": command_line(process_id) if process_id else "",
+                    "ownerUserId": owner_user_id,
+                    "ownerUserName": user_name(owner_user_id),
+                    "unitName": unit,
+                    "isEphemeral": ephemeral_low <= port <= ephemeral_high,
+                    # Killable means the kernel would let us: our own uid, a PID
+                    # we actually read, and not one of the two that must not go.
+                    "isStoppable": (
+                        process_id not in UNSTOPPABLE_PROCESS_IDS
+                        and owner_user_id == own_user_id
+                    ),
+                }
+                order.append(key)
+
+    # Every record carries the same fields, filled or empty, so the panel never
+    # has to ask whether a key exists before it reads it.
+    contexts = {}
+    for key in order:
+        record = records[key]
+        directory = working_directory(record["processId"]) if record["isStoppable"] else ""
+        record["workingDirectory"] = directory
+        record.update(git_context(directory, contexts) if directory else
+                      {"repositoryName": "", "worktreeName": "", "branchName": "", "projectPath": ""})
+
+    return {
+        "records": [records[key] for key in order],
+        "unavailable": unavailable,
+        "ownUserId": own_user_id,
+    }
+
+
+def signal_process(arguments):
+    """Signal a process only if it is still the process that was drawn.
+
+    A PID IS NOT A STABLE NAME. The panel polls, the reader looks, the reader
+    clicks — and between the poll that drew the row and the click that acts on
+    it the process can exit and the kernel can hand its number to something
+    else. On a desk that is compiling, that is not remote. `kill(2)` on the
+    recycled number ends an innocent process and reports success.
+
+    pidfd_open(2) closes it. The descriptor is a handle on THAT process, not on
+    the number: once it is open the number cannot be reused behind it, so the
+    identity check below is the last word rather than a narrower window. This is
+    the fix a security review forced on omarchy-port-manager; see
+    README.md.
+
+    `comm` is the field compared because it is the same 15 characters `ss`
+    printed, out of the same kernel struct — no truncation to reconcile.
+    """
+    if len(arguments) != 3:
+        return ("usage: listening-ports signal <pid> <process-name> TERM|KILL", 2)
+
+    process_id_text, expected_process_name, signal_name = arguments
+    if signal_name not in ("TERM", "KILL"):
+        return ("refused: signal must be TERM or KILL", 2)
+    try:
+        process_id = int(process_id_text)
+    except ValueError:
+        return ("refused: not a process id: %s" % process_id_text, 2)
+    if process_id in UNSTOPPABLE_PROCESS_IDS:
+        return ("refused: %d is not a process this panel will stop" % process_id, 2)
+
+    try:
+        descriptor = os.pidfd_open(process_id)
+    except ProcessLookupError:
+        return ("gone: %d is no longer running" % process_id, 1)
+    except OSError as error:
+        return ("refused: cannot hold %d: %s" % (process_id, error), 1)
+
+    try:
+        try:
+            with open("/proc/%d/comm" % process_id, "r") as handle:
+                actual_process_name = handle.read().rstrip("\n")
+        except OSError:
+            return ("gone: %d is no longer running" % process_id, 1)
+
+        if actual_process_name != expected_process_name:
+            return (
+                "refused: %d is now '%s', not '%s'"
+                % (process_id, actual_process_name, expected_process_name),
+                1,
+            )
+
+        number = signal_module.SIGTERM if signal_name == "TERM" else signal_module.SIGKILL
+        try:
+            signal_module.pidfd_send_signal(descriptor, number)
+        except PermissionError:
+            return ("refused: not permitted to signal %d" % process_id, 1)
+        except ProcessLookupError:
+            return ("gone: %d exited first" % process_id, 1)
+        except OSError as error:
+            return ("failed: %s" % error, 1)
+    finally:
+        os.close(descriptor)
+
+    return ("sent SIG%s to %d (%s)" % (signal_name, process_id, actual_process_name), 0)
+
+
+def main(argv):
+    command = argv[0] if argv else "list"
+    if command == "list":
+        json.dump(read_sockets(), sys.stdout, separators=(",", ":"))
+        sys.stdout.write("\n")
+        return 0
+    if command == "signal":
+        message, status = signal_process(argv[1:])
+        (sys.stdout if status == 0 else sys.stderr).write(message + "\n")
+        return status
+    sys.stderr.write(__doc__.split("\n\n")[1].strip() + "\n")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

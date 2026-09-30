@@ -1,3 +1,4 @@
 *.bak.*
 .claude/
 *.png
+__pycache__/
