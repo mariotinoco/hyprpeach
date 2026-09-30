@@ -5,6 +5,7 @@ import Quickshell.Hyprland
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "Switches.js" as Switches
 
 // A big number, in the middle of every screen, when the desktop changes.
 //
@@ -128,47 +129,57 @@ Item {
   property int fadeMilliseconds: 200
 
   readonly property int focusedWorkspaceId: Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : -1
+  readonly property string focusedMonitorName: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.monitor
+    ? String(Hyprland.focusedWorkspace.monitor.name || "") : ""
 
-  // Nothing should flash while the shell is still starting: the first value is
-  // where you already are, not somewhere you just went.
-  //
-  // Seeded when the component is built rather than on the first change. If
-  // Hyprland already has a focused workspace by then -- which it does, unless
-  // the shell started first -- the property initialises without ever emitting
-  // a change, so waiting for one meant the priming ate the first REAL switch
-  // instead of the startup value. The symptom was a number that never showed
-  // the first time you moved after a restart.
-  property bool primed: false
-
-  Component.onCompleted: {
-    var current = root.desktopFor(root.focusedWorkspaceId)
-    root.refreshBandStride()
-    if (current > 0) root.desktop = current
-    root.primed = true
-  }
+  // Each monitor's last workspace, and the desktop the desk is on: what
+  // Switches.observe needs to tell a switch from a focus move. See Switches.js.
+  property var switches: ({ workspaceByMonitor: ({}), desktop: -1 })
 
   function desktopFor(workspaceId) {
-    if (workspaceId < 1) return -1
-    return ((workspaceId - 1) % root.bandStride) + 1
+    return Switches.desktopFor(workspaceId, root.bandStride)
+  }
+
+  // SEEDED FROM HYPRCTL, not from Quickshell's own per-monitor workspace, which
+  // is stale for every monitor but the focused one -- and seeding a monitor
+  // with the wrong workspace makes the first visit to it look like a switch.
+  // Nothing flashes before this lands: a monitor not yet known is not news.
+  Process {
+    running: true
+    command: ["hyprctl", "-j", "monitors"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var monitors = JSON.parse(text)
+          var workspaceByMonitor = ({})
+          var desktop = -1
+          for (var index = 0; index < monitors.length; index++) {
+            var monitor = monitors[index]
+            if (!monitor.activeWorkspace) continue
+            workspaceByMonitor[monitor.name] = monitor.activeWorkspace.id
+            if (monitor.focused) desktop = root.desktopFor(monitor.activeWorkspace.id)
+          }
+          root.refreshBandStride()
+          root.switches = { workspaceByMonitor: workspaceByMonitor, desktop: desktop }
+          if (desktop > 0) root.desktop = desktop
+        } catch (error) {
+          // Unseeded: every monitor counts as unseen until focus visits it,
+          // so the cost is one quiet visit each, never a false flash.
+        }
+      }
+    }
   }
 
   onFocusedWorkspaceIdChanged: {
-    var next = root.desktopFor(root.focusedWorkspaceId)
-    if (next < 1) return
-
-    if (!root.primed) {
-      root.primed = true
-      root.desktop = next
-      return
-    }
-
-    // A paired switch is one dispatch per panel, so the focused workspace
-    // changes once per monitor for a single keypress. Only the desktop is the
-    // same across those, so comparing desktops — not workspace ids — is what
-    // keeps this to one flash per press.
-    if (next === root.desktop) return
-
-    root.desktop = next
+    var result = Switches.observe(root.switches, {
+      monitorName: root.focusedMonitorName,
+      workspaceId: root.focusedWorkspaceId,
+      bandStride: root.bandStride
+    })
+    root.switches = result.state
+    if (!result.flash) return
+    root.desktop = result.state.desktop
     root.opened = true
     hideTimer.restart()
   }

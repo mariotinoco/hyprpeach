@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v2.1.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v2.1.1 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v2.1.0`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v2.1.1`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -164,8 +164,8 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 2.1.0
-  🍑 desktops     2.1.0    added            Multi-Monitor Desktops
+🍑 hyprpeach 2.1.1
+  🍑 desktops     2.1.1    added            Multi-Monitor Desktops
   🌱 dev-ports    0.1.0    not added        Local Ports
   🌱 overview     0.1.0    not added        Desktop Overview
 
@@ -214,7 +214,7 @@ Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.1
 hyprctl reload
 ```
 
@@ -226,7 +226,7 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v2.1.1
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add dev-ports
 ```

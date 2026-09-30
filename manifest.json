@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprpeach",
   "name": "hyprpeach",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "hyprpeach",
   "description": "A collection of Omarchy plugins for Hyprland on more than one monitor. Add the ones you want: multi-monitor desktops that turn together across every screen, and a bar anchor for the dev servers you left running.",
   "kinds": [

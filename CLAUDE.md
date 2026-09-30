@@ -93,6 +93,7 @@ they agree.
 `bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.
 `bash tests/dev-ports.test.sh` — the dev-ports reader and its model, against a fake `ss`.
 `bash tests/overview.test.sh` — the overview's model: desktops, windows, grid.
+`bash tests/desktops.test.sh` — when the desktop number flashes, and when it must not.
 All green before a release.
 
 **A test never reaches the machine it runs on.** One did: the 1.x installer test
