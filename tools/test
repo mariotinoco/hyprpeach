@@ -15,9 +15,10 @@ run() {
 }
 
 run "library"   lua tests/hyprpeach.test.lua
+run "pin"       lua tests/pin.test.lua
 run "install"   bash tests/install.test.sh
 run "overview"  bash tests/overview.test.sh
-run "ports" bash tests/ports.test.sh
+run "ports"     bash tests/ports.test.sh
 # The animated renderer's rules and shaders, in Rust -- the Rust its mise.toml
 # pins, the same the plugin builds with. The build directory is the one the
 # plugin's own prepare uses, so this is a few seconds after the first time.

@@ -354,6 +354,21 @@ hyprpeach plugin remove overview >/dev/null 2>&1
 check "overview comes off on its own" "$([[ -L $(plugins_directory)/hyprpeach.overview ]] && echo linked || echo none)" "none"
 
 echo
+echo "a plugin that is keys gets a block of its own in hyprland.lua"
+cp "$HOME/.config/hypr/hyprland.lua" "$SANDBOX/before-pin.lua"
+hyprpeach plugin add pin > "$SANDBOX/pin.out" 2>&1
+check "adding pin succeeds" "$?" "0"
+check "pin, needing nothing, is at the top level" "$(hyprpeach plugin list | grep -c '^  🍑 pin ')" "1"
+check "hyprland.lua loads pin.lua from the clone" "$(grep -c 'plugins/hyprpeach/plugins/pin/pin.lua' "$HOME/.config/hypr/hyprland.lua")" "1"
+check "  ...after the desktops block, so its keys win" "$(awk '/>>> hyprpeach >>>/{d=NR} />>> hyprpeach pin >>>/{p=NR} END{print (d && p > d) ? "after" : "before"}' "$HOME/.config/hypr/hyprland.lua")" "after"
+check "  ...and the desktops block is untouched" "$(blocks)" "1"
+hyprpeach plugin add pin >/dev/null 2>&1
+check "adding it again leaves one block, not two" "$(grep -cF -- '-- >>> hyprpeach pin >>>' "$HOME/.config/hypr/hyprland.lua")" "1"
+hyprpeach plugin remove pin >/dev/null 2>&1
+check "removing it takes the block out, and nothing else" "$(cmp -s "$HOME/.config/hypr/hyprland.lua" "$SANDBOX/before-pin.lua" && echo same)" "same"
+check "  ...and unlinks it" "$([[ -L $(plugins_directory)/hyprpeach.pin ]] && echo linked || echo none)" "none"
+
+echo
 echo "a plugin that builds is prepared before it is linked, and only when stale"
 : > "$LOG"
 # What an earlier build left: the planet scene's NASA imagery.

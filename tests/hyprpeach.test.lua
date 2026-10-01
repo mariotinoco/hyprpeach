@@ -19,7 +19,7 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {} }
+  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {}, handlers = {}, window_rules = {} }
 
   -- The held-panel state is published to a file for the bar strip to watch, so
   -- writes are captured here rather than landing in the running session's
@@ -67,10 +67,16 @@ local function stub_hyprland(parameters)
     get_window = function(selector) return selector end,
     get_monitor = function(name) return (parameters.monitors or {})[name] end,
     get_monitor_at_cursor = function() return parameters.monitor_at_cursor end,
+    get_monitors = function() return parameters.monitor_list or {} end,
+    on = function(event, handler) recorder.handlers[event] = handler end,
+    window_rule = function(rule) recorder.window_rules[#recorder.window_rules + 1] = rule end,
     notification = { create = function(note) recorder.notifications[#recorder.notifications + 1] = note.text end },
     dsp = {
       focus = function(options) return { kind = "focus", options = options } end,
-      window = { move = function(options) return { kind = "move", options = options } end },
+      window = {
+        move = function(options) return { kind = "move", options = options } end,
+        center = function(options) return { kind = "center", options = options } end,
+      },
       workspace = { swap_monitors = function(options) return { kind = "swap", options = options } end },
       event = function(payload) return { kind = "event", payload = payload } end,
     },
@@ -132,6 +138,39 @@ do
 end
 
 -- --------------------------------------------------------------------------
+print("\na floating window that opens off the desk is brought onto it")
+do
+  -- Two 7680 x 2160 panels stacked, as the desk this was written on.
+  local panels = {
+    { x = 0, y = -2160, width = 7680, height = 2160, scale = 1, transform = 0 },
+    { x = 0, y = 0, width = 7680, height = 2160, scale = 1, transform = 0 },
+  }
+  local _, recorder = fresh_peach({ monitor_list = panels })
+  local opened = recorder.handlers["window.open"]
+  check({ label = "it listens for windows opening", got = opened ~= nil, want = true })
+  local function centred_after(window)
+    local before = #recorder.dispatched
+    opened(window)
+    local last = recorder.dispatched[#recorder.dispatched]
+    return #recorder.dispatched > before and last.kind == "center" and last.options.window or "left alone"
+  end
+  check({ label = "Toolbox at x = -440, left of a bar on the left edge, is centred", got = centred_after({ address = "0xb0", floating = true, at = { x = -440, y = 0 }, size = { x = 440, y = 700 } }), want = "address:0xb0" })
+  check({ label = "a window partly on screen is where somebody put it", got = centred_after({ address = "0xb1", floating = true, at = { x = -200, y = 0 }, size = { x = 440, y = 700 } }), want = "left alone" })
+  check({ label = "a window on the top panel is on the desk", got = centred_after({ address = "0xb2", floating = true, at = { x = 100, y = -1000 }, size = { x = 400, y = 300 } }), want = "left alone" })
+  check({ label = "a tiled window is the layout's to place", got = centred_after({ address = "0xb3", floating = false, at = { x = -440, y = 0 }, size = { x = 440, y = 700 } }), want = "left alone" })
+
+  -- Toolbox moves its own window back off the edge every time it is shown,
+  -- so centring it once is not enough: Hyprland has to stop taking its word.
+  local toolbox
+  for _, rule in ipairs(recorder.window_rules) do
+    if rule.match and rule.match.class == "^jetbrains-toolbox$" then toolbox = rule end
+  end
+  check({ label = "JetBrains Toolbox has a rule of its own", got = toolbox ~= nil, want = true })
+  check({ label = "  ...that stops it moving its own window", got = toolbox and toolbox.suppress_event, want = "x11configurerequest" })
+  check({ label = "  ...and puts it right of the bar, at the bottom, beside the tray", got = toolbox and table.concat(toolbox.move, " "), want = "47 (monitor_h-window_h-10)" })
+  check({ label = "no rule for every window: dialogs move themselves for good reasons", got = #recorder.window_rules, want = 1 })
+end
+
 print("\nnine desktops, a 3 x 3, and not a setting")
 do
   -- 2.x's README put `desktop_count = 10` in the setup() call people copied.

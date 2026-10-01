@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "hyprpeach.pin",
+  "name": "Pin",
+  "version": "0.1.0",
+  "author": "hyprpeach",
+  "description": "SUPER + P pins a window, tiled or floating, so it follows you from desktop to desktop on its panel. With SUPER + T to float, it replaces Omarchy's SUPER + O, which floats, resizes, centres and pins in one press.",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Pin.qml"
+  },
+  "hyprpeach": {
+    "hyprland": "pin.lua"
+  }
+}

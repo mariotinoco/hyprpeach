@@ -281,6 +281,7 @@ command_plugin_add() {
   fi
 
   [[ $name != desktops ]] || add_desktops_to_hyprland
+  add_plugin_to_hyprland "$name"
   # Here as well as in the service, because this is the first command a
   # registry install runs -- by its full path, before anything is on PATH.
   command_link_command
@@ -305,6 +306,7 @@ command_plugin_remove() {
     required_plugin_names "$other" | grep -xF -- "$name" >/dev/null && die "$other needs $name.\n  Remove it first: hyprpeach plugin remove $other"
   done < <(available_plugin_names)
   [[ $name != desktops ]] || remove_desktops_from_hyprland
+  remove_plugin_from_hyprland "$name"
   omarchy plugin remove "$id" --yes >/dev/null
   say "removed $id"
 }
@@ -366,6 +368,7 @@ LUA
 }
 
 require_hyprland_config() {
+  local begin=$1 end=$2
   require_command hyprctl "is Hyprland installed?"
   require_command jq "install it with: omarchy pkg add jq"
   [[ -f $ENTRY ]] || die "no $ENTRY — this expects Hyprland's Lua config"
@@ -374,20 +377,32 @@ require_hyprland_config() {
   # reports no match -- invisibly, in an `if`, so the block is appended again.
   # Both markers have to be there: with only the opening one the awk below
   # would treat everything after it as the block and delete the rest of the file.
-  if grep -qF -- "$BEGIN" "$ENTRY" && ! grep -qF -- "$END" "$ENTRY"; then
-    die "$ENTRY has the hyprpeach opening marker but not the closing one.\n  Repair or remove the block by hand, then run this again."
+  if grep -qF -- "$begin" "$ENTRY" && ! grep -qF -- "$end" "$ENTRY"; then
+    die "$ENTRY has the opening marker $begin but not the closing one.\n  Repair or remove the block by hand, then run this again."
   fi
 }
 
-# Every hyprpeach block in hyprland.lua replaced by `replacement` -- the FIRST
-# one by it, any others dropped -- so this converges on at most one however many
-# are there. An empty replacement removes the block.
+# Every block between `begin` and `end` in hyprland.lua replaced by
+# `replacement` -- the FIRST one by it, any others dropped -- so this converges
+# on at most one however many are there. An empty replacement removes the block.
+# Each plugin's block has markers of its own, so one never touches another's.
 replace_hyprland_block() {
-  local replacement=$1
-  awk -v begin="$BEGIN" -v end="$END" -v replacement="$replacement" '
-    index($0,begin){ if (!done && replacement != "") print replacement; done=1; skipping=1; next }
+  local begin=$1 end=$2 replacement=$3
+  # Blank lines are held back until the next line is known: a block that is
+  # removed takes the one blank line `add` put before it, so adding and
+  # removing leaves the file exactly as it was, not a line longer each time.
+  awk -v begin="$begin" -v end="$end" -v replacement="$replacement" '
+    index($0,begin){
+      if (replacement == "") held = substr(held, 2)
+      printf "%s", held; held = ""
+      if (!done && replacement != "") print replacement
+      done=1; skipping=1; next
+    }
     index($0,end){ skipping=0; next }
-    !skipping' "$ENTRY" > "$ENTRY.hyprpeach.tmp"
+    skipping { next }
+    $0 == "" { held = held "\n"; next }
+    { printf "%s", held; held = ""; print }
+    END { printf "%s", held }' "$ENTRY" > "$ENTRY.hyprpeach.tmp"
   mv "$ENTRY.hyprpeach.tmp" "$ENTRY"
 }
 
@@ -399,7 +414,7 @@ reload_hyprland() {
 }
 
 add_desktops_to_hyprland() {
-  require_hyprland_config
+  require_hyprland_config "$BEGIN" "$END"
   hyprctl monitors -j >/dev/null 2>&1 || die "Hyprland is not running, so its monitors cannot be read"
 
   # The monitors, in physical order with the bottom one first. Sorted by y
@@ -421,7 +436,7 @@ add_desktops_to_hyprland() {
   if grep -qF -- "$BEGIN" "$ENTRY"; then
     # Also the 1.x migration: the block 1.x wrote loads the library from
     # ~/.config/hypr/hyprpeach, and this one loads it from the plugin.
-    replace_hyprland_block "$(setup_block "$monitors")"
+    replace_hyprland_block "$BEGIN" "$END" "$(setup_block "$monitors")"
   else
     say "appending hyprpeach to hyprland.lua (after your defaults, which is required)"
     printf '\n%s\n' "$(setup_block "$monitors")" >> "$ENTRY"
@@ -455,12 +470,70 @@ add_desktops_to_hyprland() {
 # where Omarchy ships them. The bar's position does not: what it was before is
 # not recorded anywhere, and guessing would move somebody's bar twice.
 remove_desktops_from_hyprland() {
-  require_hyprland_config
-  replace_hyprland_block ""
+  require_hyprland_config "$BEGIN" "$END"
+  replace_hyprland_block "$BEGIN" "$END" ""
   omarchy plugin enable omarchy.workspaces >/dev/null 2>&1 || true
   omarchy plugin enable omarchy.menu --section left >/dev/null 2>&1 || true
   reload_hyprland
   say "Hyprland's own workspace keys are back. The bar stays where it is: omarchy bar position top moves it."
+}
+
+# A PLUGIN THAT IS HYPRLAND CONFIGURATION. Some plugins are keys rather than
+# anything on screen -- pin is SUPER + P -- and keys live in Hyprland's config,
+# not the shell. Such a plugin names a Lua file in its manifest
+# (`hyprpeach.hyprland`), and adding it puts a block in hyprland.lua that loads
+# that file from this clone, so `omarchy plugin update` moves it like any other.
+# Removing it takes the block out. Each has its own markers, after desktops',
+# so its keys are bound last and win.
+plugin_hyprland_file() {
+  local name=$1
+  jq -r '.hyprpeach.hyprland // empty' "$ROOT/plugins/$name/manifest.json"
+}
+
+plugin_block_markers() {
+  local name=$1
+  printf '%s\n%s\n' "-- >>> hyprpeach $name >>>" "-- <<< hyprpeach $name <<<"
+}
+
+# Loaded only if it is there: with hyprpeach uninstalled and the block left
+# behind, Hyprland starts without the keys rather than with a config error.
+plugin_block() {
+  local name=$1 file=$2 begin=$3 end=$4
+  cat <<LUA
+$begin
+-- Loaded from the hyprpeach plugin's clone, which \`omarchy plugin update\` keeps current.
+do
+  local file = os.getenv("HOME") .. "/.config/omarchy/plugins/$PLUGIN_ID/plugins/$name/$file"
+  local readable = io.open(file, "r")
+  if readable then readable:close(); dofile(file) end
+end
+$end
+LUA
+}
+
+add_plugin_to_hyprland() {
+  local name=$1
+  local file begin end
+  file=$(plugin_hyprland_file "$name")
+  [[ -n $file ]] || return 0
+  { read -r begin; read -r end; } < <(plugin_block_markers "$name")
+  require_hyprland_config "$begin" "$end"
+  if grep -qF -- "$begin" "$ENTRY"; then
+    replace_hyprland_block "$begin" "$end" "$(plugin_block "$name" "$file" "$begin" "$end")"
+  else
+    printf '\n%s\n' "$(plugin_block "$name" "$file" "$begin" "$end")" >> "$ENTRY"
+  fi
+  reload_hyprland
+}
+
+remove_plugin_from_hyprland() {
+  local name=$1
+  local begin end
+  [[ -n $(plugin_hyprland_file "$name") ]] || return 0
+  { read -r begin; read -r end; } < <(plugin_block_markers "$name")
+  require_hyprland_config "$begin" "$end"
+  replace_hyprland_block "$begin" "$end" ""
+  reload_hyprland
 }
 
 # ---------------------------------------------------------------- the rest

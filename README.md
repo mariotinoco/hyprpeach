@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v3.0.1 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v3.1.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.0.1`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.1.0`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -163,10 +163,11 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 3.0.1
-  🍑 desktops                 3.0.1    added      Multi-Monitor Desktops
+🍑 hyprpeach 3.1.0
+  🍑 desktops                 3.0.2    added      Multi-Monitor Desktops
   ├─ 🌱 animated              0.1.0    not added  Animated Desktops
   └─ 🌱 overview              0.2.1    not added  Desktop Overview
+  🌱 pin                      0.1.0    not added  Pin
   🌱 ports                    0.1.0    not added  Local Ports
 
 $ hyprpeach plugin add ports
@@ -178,11 +179,12 @@ $ hyprpeach plugin remove desktops
 | [**desktops**](#how-it-works) — Multi-Monitor Desktops | A desktop that spans every monitor and turns as one: the library, [the bar strip](#the-bar-strip), and the overlay. Two monitors, three, one [held](#holding-a-panel) while the rest move. |
 | [**animated**](plugins/animated/README.md) — Animated Desktops | A living scene behind your desktops — synthwave or a nebula — with a different place for each desktop, one picture across your monitors, and every switch a flight to the next. Needs desktops. |
 | [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + 0` or `SUPER + TAB` shows every desktop at once, a 3 × 3 on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
+| [**pin**](plugins/pin/README.md) — Pin | `SUPER + P` pins a window — tiled or floating — so it follows you from desktop to desktop on its panel. With `SUPER + T` to float, it replaces Omarchy's `SUPER + O`, which floats, resizes, centres and pins in one press. |
 | [**ports**](plugins/ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
 
 **They update with hyprpeach.** `add` links the plugin's folder inside hyprpeach's clone into Omarchy's plugins folder, rather than copying it out, so the one `omarchy plugin update` that moves hyprpeach moves every plugin you added from it. There is nothing else to keep current, and nothing that can fall behind.
 
-Each has its own version and its own release notes — `ports-v0.1.0` beside hyprpeach's `v3.0.1` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
+Each has its own version and its own release notes — `ports-v0.1.0` beside hyprpeach's `v3.1.0` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
 
 It is done this way because Omarchy installs one plugin per repository and reads one bar widget per plugin: separate widgets need separate plugin folders, and a repository per widget would split one project across several.
 
@@ -217,7 +219,7 @@ Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.1
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.1.0
 hyprctl reload
 ```
 
@@ -229,7 +231,7 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.1
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.1.0
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add ports
 ```
@@ -318,7 +320,7 @@ hyprpeach puts every pinned window back on the workspace its own monitor is show
 
 It reads the pointer rather than the focus because the gesture is *that screen, the one I am looking at* — and focusing a panel in order to hold it would move the very thing you are trying to leave alone.
 
-**There is no way to do this with window pinning.** Hyprland refuses to pin a tiled window outright — `pin` is for floating windows, which is why Omarchy's `SUPER + O` floats a window before it pins it. A screen full of tiles cannot be pinned one window at a time, so holding belongs to whatever owns the panels, which is this.
+**There is no way to do this with window pinning.** Hyprland refuses to pin a tiled window outright — `pin` is for floating windows, which is why Omarchy's `SUPER + O` floats a window before it pins it ([pin](plugins/pin/README.md)'s `SUPER + P` gets round that by moving a tagged window itself). A screen full of tiles cannot be pinned one window at a time, so holding belongs to whatever owns the panels, which is this.
 
 A hold lasts as long as the session and a Hyprland reload clears it. That is deliberate for a mode you can forget you are in: the worst case is that it lapses, not that a screen stays silently stuck.
 

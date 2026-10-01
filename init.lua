@@ -792,6 +792,64 @@ end
 --- the trailing token is the serial.
 ---
 --- `keys` is merged key-by-key, so overriding one chord keeps the rest.
+--- A FLOATING WINDOW THAT OPENS OFF THE DESK IS BROUGHT ONTO IT.
+---
+--- desktops puts the bar down the left edge (bin/hyprpeach says why). Apps
+--- that open a window beside their tray icon -- JetBrains Toolbox does, under
+--- XWayland -- assume a bar along the top and put the window to the icon's
+--- LEFT, which with the bar on the left edge is past the edge of the desk: on
+--- the machine this was written on, at x = -440 on a desk starting at 0. The
+--- app is running, its window is open, and every launch from the menu only
+--- refocuses a window nobody can see. Measured on Hyprland 0.56.2, Toolbox
+--- 3.8.1: it places the window once, when it opens, and leaves it where it
+--- is put afterwards, so centring it once is enough.
+---
+--- Only a floating window entirely outside every monitor -- a tiled one is
+--- placed by the layout, and one partly on screen was put there on purpose.
+---
+--- That catches a window that OPENS off the desk. An app that also moves its
+--- own window every time it is shown is caught by TRAY_POPUP_CLASSES below.
+local function bring_window_onto_the_desk(window)
+  if window == nil or not window.floating or window.at == nil or window.size == nil then return end
+  for _, monitor in ipairs(hl.get_monitors()) do
+    local scale = (monitor.scale or 1) > 0 and monitor.scale or 1
+    local turned = (monitor.transform or 0) % 2 == 1
+    local width = (turned and monitor.height or monitor.width) / scale
+    local height = (turned and monitor.width or monitor.height) / scale
+    local overlaps = window.at.x < monitor.x + width and window.at.x + window.size.x > monitor.x
+      and window.at.y < monitor.y + height and window.at.y + window.size.y > monitor.y
+    if overlaps then return end
+  end
+  hl.dispatch(hl.dsp.window.center({ window = "address:" .. window.address }))
+end
+
+--- APPS THAT PUT THEIR WINDOW BESIDE THEIR TRAY ICON, EVERY TIME IT IS SHOWN.
+--- Under XWayland such an app moves its own window, and Hyprland does as it
+--- asks (CWindow::onX11ConfigureRequest, src/desktop/view/Window.cpp,
+--- 0.56.2) -- so centring it when it opens lasts until the next time it is
+--- shown, and then it is off the left edge again. Measured: JetBrains Toolbox
+--- 3.8.1 put itself back at x = -440 on the first show after being moved.
+---
+--- So for these, Hyprland ignores the app's own moves (`x11configurerequest`
+--- -- the one setting it has for this) and places the window itself, where a
+--- tray popup belongs with the bar down the left edge: just right of the bar,
+--- at the bottom, beside the tray. 47 is Omarchy's bar (37) and outer gap (10).
+---
+--- A list, not every X11 window: dialogs and editors move and size their
+--- windows for good reasons, and would break. Add a class here when an app is
+--- found doing this; `hyprctl clients` names it.
+local TRAY_POPUP_CLASSES = { "jetbrains-toolbox" }
+
+local function place_tray_popups()
+  for _, class in ipairs(TRAY_POPUP_CLASSES) do
+    hl.window_rule({
+      match = { class = "^" .. class .. "$" },
+      suppress_event = "x11configurerequest",
+      move = { "47", "(monitor_h-window_h-10)" },
+    })
+  end
+end
+
 function peach.setup(options)
   options = options or {}
   if options.monitors_bottom_to_top == nil or #options.monitors_bottom_to_top < 1 then
@@ -815,6 +873,9 @@ function peach.setup(options)
       time = 15000,
     })
   end
+
+  hl.on("window.open", bring_window_onto_the_desk)
+  place_tray_popups()
 
   state.focus_follows_fling = chosen("focus_follows_fling")
   state.notify = chosen("notify")

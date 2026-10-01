@@ -79,6 +79,7 @@ way an update would, and the change is checked there first.
 `npm test` runs every suite below; a release refuses to publish without it passing.
 
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.
+`lua tests/pin.test.lua` — the pin plugin's keys, against a stubbed `hl`.
 `bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.
 `bash tests/ports.test.sh` — the ports reader and its model, against a fake `ss`.
 `bash tests/overview.test.sh` — the overview's model: desktops, windows, grid.
