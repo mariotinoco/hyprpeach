@@ -421,6 +421,28 @@ command_upgrade() {
   command_plugin_list
 }
 
+# THE ORBIT'S SCENE. With no name, the scenes this clone carries -- one file
+# each in the renderer's src/scenes/ -- and which is showing. With one, the
+# running renderer is told to change, and it remembers the choice itself
+# ($XDG_STATE_HOME/hyprpeach/orbit.json), refusing a scene it cannot compile.
+command_scene() {
+  local name=${1:-} scenes="$ROOT/plugins/orbit/renderer/src/scenes"
+  local remembered="${XDG_STATE_HOME:-$HOME/.local/state}/hyprpeach/orbit.json"
+  local current
+  current=$(jq -r '.scene // ""' "$remembered" 2>/dev/null || true)
+  if [[ -z $name ]]; then
+    local file scene
+    for file in "$scenes"/*.wgsl; do
+      scene=$(basename "$file" .wgsl)
+      if [[ $scene == "$current" ]]; then say "$scene  (showing)"; else printf '   %s\n' "$scene"; fi
+    done
+    return
+  fi
+  [[ -f $scenes/$name.wgsl ]] || die "no scene called $name — \`hyprpeach scene\` lists them"
+  hyprctl eval "hl.dispatch(hl.dsp.event(\"hyprpeach-scene,$name\"))" >/dev/null
+  say "scene: $name"
+}
+
 command_help() {
   cat <<'USAGE'
 🍑 hyprpeach — Omarchy plugins for Hyprland on more than one monitor
@@ -429,6 +451,7 @@ command_help() {
   hyprpeach plugin add <name>     add one — it updates whenever hyprpeach does
   hyprpeach plugin remove <name>  take one off again
   hyprpeach upgrade               omarchy plugin update, then reload Hyprland
+  hyprpeach scene [name]          the orbit's scenes, or show another
   hyprpeach version               the same as plugin list
   hyprpeach link-command          put `hyprpeach` on PATH (the plugin does this itself)
   hyprpeach help                  this
@@ -448,6 +471,7 @@ main() {
       esac
       ;;
     upgrade) command_upgrade ;;
+    scene) command_scene "${2:-}" ;;
     version) command_plugin_list ;;
     link-command) command_link_command ;;
     help|-h|--help) command_help ;;

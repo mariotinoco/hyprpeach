@@ -6,15 +6,13 @@ import Quickshell.Wayland
 import qs.Commons
 import "Model.js" as Model
 
-// Every desktop at once, as ONE grid across the whole desk.
+// Every desktop at once: a 3 x 3 grid on every monitor.
 //
 // SUPER + TAB or SUPER + 0 fires a Hyprland custom event (peach.toggle_overview
 // in init.lua), and every shell instance hears it, so every monitor opens
-// together. The grid is laid out on the DESK, not on each monitor: every
-// monitor draws its own part of it, the way the desk is one window when you
-// work. Each cell is that desktop in miniature -- its windows from every
-// monitor, where they sit -- and choosing one turns the whole desk through the
-// same peach.focus_desktop the number keys use.
+// together. Each monitor shows the nine desktops as they are on IT -- Model.js
+// says why that, and not one grid across the desk -- and choosing one turns the
+// whole desk through the same peach.focus_desktop the number keys use.
 //
 // WHY THE WINDOWS ARE CAPTURED ONE BY ONE. Hyprland does not render a
 // workspace nobody is looking at, so there is no picture of a hidden desktop to
@@ -120,7 +118,6 @@ Item {
     onLoadFailed: root.heldPanels = ({})
   }
 
-  readonly property var grid: Model.deskGrid(root.state)
   readonly property int current: Model.currentDesktop(root.state)
 
   Variants {
@@ -132,11 +129,8 @@ Item {
         required property var modelData
         screen: modelData
 
-        // Where this monitor sits on the desk, so the one grid can be drawn
-        // through it at the right offset.
         readonly property var monitor: Model.monitorNamed(root.state, panel.screen ? String(panel.screen.name || "") : "")
-        readonly property real offsetX: panel.monitor ? panel.monitor.x - root.grid.box.x : 0
-        readonly property real offsetY: panel.monitor ? panel.monitor.y - root.grid.box.y : 0
+        readonly property var grid: panel.monitor ? Model.monitorGrid(panel.monitor) : ({ cells: [], scale: 1 })
 
         visible: root.opened
         color: "transparent"
@@ -176,18 +170,16 @@ Item {
         }
 
         Repeater {
-          model: root.grid.cells
+          model: panel.grid.cells
 
           delegate: Item {
             id: cell
             required property var modelData
             readonly property bool current: cell.modelData.desktop === root.current
-            readonly property var windows: root.opened ? Model.windowsOnDesktop(root.state, cell.modelData.desktop) : []
+            readonly property var windows: root.opened && panel.monitor ? Model.windowsOnMonitorDesktop(root.state, panel.monitor, cell.modelData.desktop) : []
 
-            // The desk's grid, seen through this monitor: cells off this
-            // screen land outside it and are simply not drawn here.
-            x: cell.modelData.x - panel.offsetX
-            y: cell.modelData.y - panel.offsetY
+            x: cell.modelData.x
+            y: cell.modelData.y
             width: cell.modelData.width
             height: cell.modelData.height
 
@@ -215,10 +207,10 @@ Item {
                   id: thumbnail
                   required property var modelData
                   readonly property var toplevel: root.opened ? root.toplevelFor(thumbnail.modelData.client.address) : null
-                  x: thumbnail.modelData.x * root.grid.scale
-                  y: thumbnail.modelData.y * root.grid.scale
-                  width: Math.max(1, thumbnail.modelData.width * root.grid.scale)
-                  height: Math.max(1, thumbnail.modelData.height * root.grid.scale)
+                  x: thumbnail.modelData.x * panel.grid.scale
+                  y: thumbnail.modelData.y * panel.grid.scale
+                  width: Math.max(1, thumbnail.modelData.width * panel.grid.scale)
+                  height: Math.max(1, thumbnail.modelData.height * panel.grid.scale)
 
                   // Until a frame arrives, or if one never does: the window's
                   // class, where the window is, so the layout still reads.

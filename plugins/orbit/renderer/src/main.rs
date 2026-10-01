@@ -1,12 +1,14 @@
-//! hyprpeach orbit: low orbit, drawn natively on every monitor's
-//! background layer, as one window onto one world.
+//! hyprpeach orbit: a scene drawn natively on every monitor's background
+//! layer, as one window onto one world.
 //!
 //! Wayland layer-shell surfaces (one per output) + wgpu (Vulkan). Per frame and
 //! per monitor: the scene at an internal resolution with sub-pixel jitter,
 //! temporal anti-aliasing into a history, a six-level bloom, and a filmic final
-//! pass up to the panel. Hyprland's event socket moves the camera.
+//! pass up to the panel. Hyprland's event socket moves the camera and picks
+//! the scene; src/common.wgsl says what a scene is.
 
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
@@ -36,7 +38,12 @@ use wayland_client::{
 
 const HDR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const BLOOM_LEVELS: usize = 6;
-const PLANET_RADIUS: f32 = 6360.0;
+
+/// Every scene in src/scenes/, by name, each a complete shader with
+/// src/common.wgsl in front of it (build.rs makes the list).
+const SCENES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/scenes.rs"));
+/// Shown until someone picks another with `hyprpeach scene <name>`.
+const DEFAULT_SCENE: &str = "synthwave";
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -53,7 +60,10 @@ struct Uniforms {
 }
 
 struct Pipelines {
-    scene: wgpu::RenderPipeline,
+    /// Built the first time each scene is shown, so a scene that fails to
+    /// compile costs only itself.
+    scenes: HashMap<String, wgpu::RenderPipeline>,
+    scene_pipeline_layout: wgpu::PipelineLayout,
     taa: wgpu::RenderPipeline,
     bloom_down: wgpu::RenderPipeline,
     bloom_up: wgpu::RenderPipeline,
@@ -88,47 +98,42 @@ struct Panel {
     height: u32,
     targets: Option<Targets>,
     frame: u32,
-    last_render: Instant,
-    last_history: usize,
 }
 
-/// Where the camera is on the ring, and where it is going.
+/// Where the desk is, in desktops, and where it is going.
 ///
-/// Desktop N is frame N of one 360-degree view, 40 degrees a frame, each to the
-/// right of the last and 9 round to 1. Every move turns the short way round the
-/// ring, so N -> N+1 is always the same 40-degree turn right -- 3 -> 4 and
-/// 9 -> 1 included -- and no jump turns more than four frames.
+/// Desktop N is position N - 1, and every scene repeats every 9. Every move
+/// goes the short way round, so N -> N+1 is always one step forward -- 3 -> 4
+/// and 9 -> 1 included -- and no jump is longer than four.
 struct Camera {
-    heading_from: f32,
-    heading_to: f32,
+    position_from: f32,
+    position_to: f32,
     started: Instant,
 }
 
-const FRAME: f32 = std::f32::consts::TAU / 9.0;
-/// The heading of desktop 1; the ring turns right from it.
-const FIRST_HEADING: f32 = 0.4;
-const ALTITUDE: f32 = 480.0;
+const DESKTOP_COUNT: f32 = 9.0;
 
+/// The step from `from` to the nearest position that shows the same desktop
+/// as `to`: between -4.5 and 4.5.
 fn shortest(from: f32, to: f32) -> f32 {
-    (to - from + 3.0 * std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+    (to - from + DESKTOP_COUNT * 1.5).rem_euclid(DESKTOP_COUNT) - DESKTOP_COUNT * 0.5
 }
 
 impl Camera {
     const SECONDS: f32 = 1.6;
 
     fn aim(&mut self, desktop: i32, now: Instant) {
-        let (heading, _) = self.at(now);
-        let index = (desktop - 1).rem_euclid(9);
-        self.heading_from = heading;
-        self.heading_to = heading + shortest(heading, FIRST_HEADING - index as f32 * FRAME);
+        let (position, _) = self.at(now);
+        self.position_from = position;
+        self.position_to = position + shortest(position, (desktop - 1).rem_euclid(9) as f32);
         self.started = now;
     }
 
-    /// Heading, and how hard the camera is moving (0..1).
+    /// Position, and how hard the camera is moving (0..1).
     fn at(&self, now: Instant) -> (f32, f32) {
         let p = ((now - self.started).as_secs_f32() / Self::SECONDS).clamp(0.0, 1.0);
         let e = p * p * p * (p * (p * 6.0 - 15.0) + 10.0);
-        (self.heading_from + (self.heading_to - self.heading_from) * e, (p * std::f32::consts::PI).sin())
+        (self.position_from + (self.position_to - self.position_from) * e, (p * std::f32::consts::PI).sin())
     }
 }
 
@@ -136,6 +141,7 @@ impl Camera {
 enum Announcement {
     Desktop(i32),
     Overview(bool),
+    Scene(String),
 }
 
 struct App {
@@ -154,6 +160,10 @@ struct App {
     camera: Camera,
     announcements: mpsc::Receiver<Announcement>,
     overview: bool,
+    /// The scene on the desk, and its source: compiled in, or read from
+    /// HYPRPEACH_SCENE_FILE while one is being written.
+    scene: String,
+    scene_sources: HashMap<String, String>,
     scale: f32,
     frames: u32,
     last_report: Instant,
@@ -328,6 +338,26 @@ impl App {
         (left, top, right - left, bottom - top)
     }
 
+    /// Compiles a scene if it has not been yet. A scene that is unknown or does
+    /// not compile is reported and refused, and the desk keeps the one it has.
+    fn prepare_scene(&mut self, name: &str) -> bool {
+        if self.pipelines.scenes.contains_key(name) { return true; }
+        let Some(source) = self.scene_sources.get(name) else {
+            eprintln!("no scene called {name}; there are: {}", SCENES.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "));
+            return false;
+        };
+        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let module = self.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some(name), source: wgpu::ShaderSource::Wgsl(source.as_str().into()) });
+        let pipeline = fullscreen_pipeline(&self.device, &self.pipelines.scene_pipeline_layout, &module, "fs", HDR, None);
+        if let Some(error) = pollster::block_on(scope.pop()) {
+            eprintln!("scene {name} does not compile:\n{error}");
+            return false;
+        }
+        self.pipelines.scenes.insert(name.to_string(), pipeline);
+        eprintln!("scene: {name}");
+        true
+    }
+
     fn render(&mut self, index: usize, qh: &QueueHandle<Self>) {
         while let Ok(announcement) = self.announcements.try_recv() {
             match announcement {
@@ -342,23 +372,28 @@ impl App {
                         panel.layer.set_layer(if open { Layer::Top } else { Layer::Background });
                     }
                 }
+                Announcement::Scene(name) => {
+                    if self.prepare_scene(&name) {
+                        self.scene = name;
+                        remember_scene(&self.scene);
+                    }
+                }
                 _ => {}
             }
         }
         let now = Instant::now();
         let time = (now - self.started).as_secs_f32();
-        let (heading, motion) = self.camera.at(now);
-        let altitude = ALTITUDE;
+        let (position, motion) = self.camera.at(now);
+        // For captures of a switch in flight: HYPRPEACH_POSITION holds the desk
+        // there, and HYPRPEACH_MOTION says how hard it is moving.
+        let position = std::env::var("HYPRPEACH_POSITION").ok().and_then(|v| v.parse().ok()).unwrap_or(position);
+        let motion = std::env::var("HYPRPEACH_MOTION").ok().and_then(|v| v.parse().ok()).unwrap_or(motion);
 
-        // IDLE AT TEN FRAMES A SECOND. Behind a desk of windows the scene only
-        // drifts -- the planet turning, the clouds -- and drawing it at the
-        // panel's full rate cost 110 W for nothing. So between fresh frames the
-        // last one is presented again through the final pass alone: a texture
-        // read and a tone curve. A frame is still presented every refresh,
-        // because Hyprland sends the next frame callback only after a redraw,
-        // and a surface that stops presenting stops being asked. Moving, or
-        // with the overview open, every frame is fresh.
-        let fresh = motion > 0.001 || self.overview || self.panels[index].last_render.elapsed().as_millis() >= 100;
+        // EVERY FRAME FRESH. This once drew ten new frames a second and showed
+        // the last one again in between, to save power behind a desk of
+        // windows; anything that moved on its own -- a planet turning, clouds
+        // -- then stepped along like a slideshow, which is all anyone saw. A
+        // scene is held to costing little enough to draw at the panel's rate.
         let (desk_left, desk_top, desk_width, desk_height) = self.desk();
         let pane = {
             let panel = &self.panels[index];
@@ -373,31 +408,26 @@ impl App {
             self.pipelines.final_pass = Some((format, pipeline));
         }
 
-        let eye = [0.0, PLANET_RADIUS + altitude, 0.0];
         let panel = &mut self.panels[index];
         let targets = panel.targets.as_ref().unwrap();
         let (iw, ih) = (((panel.width as f32) * self.scale) as u32, ((panel.height as f32) * self.scale) as u32);
-        let i = if fresh { (panel.frame % 2) as usize } else { panel.last_history };
+        let i = (panel.frame % 2) as usize;
         let jitter = [halton(panel.frame % 16 + 1, 2) - 0.5, halton(panel.frame % 16 + 1, 3) - 0.5];
         let blend = if panel.frame == 0 { 1.0 } else if motion > 0.02 { 0.45 } else { 0.1 };
-        if fresh { panel.last_render = now; panel.last_history = i; }
         let uniforms = Uniforms {
-            eye: [eye[0], eye[1], eye[2], time],
-            // The camera itself is built in the shader from the heading, the
-            // same way for the live desk and for its overview cell.
-            forward: [0.0, 0.0, 0.0, heading],
+            eye: [0.0, 0.0, 0.0, time],
+            forward: [0.0, 0.0, 0.0, position],
             right: [0.0, 0.0, 0.0, desk_width / desk_height],
             up: [0.0, 0.0, 0.0, motion],
             pane,
-            // The station near dawn: the sun 8 degrees up, so turning round the
-            // ring passes sunrise glare, day, the terminator, and the night side.
+            // Near dawn: the sun 8 degrees up.
             sun: {
                 let s = normalize([0.98, 0.14, 0.12]);
                 [s[0], s[1], s[2], 1.3 + time * 0.0105]
             },
             jitter: [jitter[0], jitter[1], iw as f32, ih as f32],
             extra: [panel.width as f32, panel.height as f32, (panel.frame % 1024) as f32, blend],
-            view: [0.0, if self.overview { 1.0 } else { 0.0 }, altitude, FIRST_HEADING],
+            view: [0.0, if self.overview { 1.0 } else { 0.0 }, 0.0, 0.0],
         };
         self.queue.write_buffer(&targets.uniform, 0, bytemuck::bytes_of(&uniforms));
 
@@ -421,8 +451,9 @@ impl App {
             pass.draw(0..3, 0..1);
         };
         let clear = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
-        if fresh {
-            pass(&mut encoder, &targets.scene, clear, &self.pipelines.scene, &[&targets.scene_group, &self.pipelines.planet]);
+        {
+            let scene = &self.pipelines.scenes[&self.scene];
+            pass(&mut encoder, &targets.scene, clear, scene, &[&targets.scene_group, &self.pipelines.planet]);
             pass(&mut encoder, &targets.history[i], clear, &self.pipelines.taa, &[&targets.taa_groups[i]]);
             pass(&mut encoder, &targets.bloom[0], clear, &self.pipelines.bloom_down, &[&targets.bloom_first[i]]);
             for level in 1..BLOOM_LEVELS {
@@ -438,7 +469,7 @@ impl App {
         // it. Set HYPRPEACH_CAPTURE to a directory and each panel saves frame
         // HYPRPEACH_CAPTURE_FRAME (default 150) as a PNG, then carries on.
         let capture_frame: u32 = std::env::var("HYPRPEACH_CAPTURE_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(150);
-        let capture = std::env::var("HYPRPEACH_CAPTURE").ok().filter(|_| fresh && panel.frame == capture_frame);
+        let capture = std::env::var("HYPRPEACH_CAPTURE").ok().filter(|_| panel.frame == capture_frame);
         let mut readback = None;
         if let Some(directory) = capture {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -477,7 +508,7 @@ impl App {
             image.save(&path).expect("save capture");
             eprintln!("captured {path}");
         }
-        if fresh { panel.frame += 1; }
+        panel.frame += 1;
 
         self.frames += 1;
         if self.last_report.elapsed().as_secs_f32() >= 2.0 {
@@ -520,7 +551,7 @@ impl OutputHandler for App {
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle: Some(display), raw_window_handle: window })
                 .expect("wgpu surface")
         };
-        self.panels.push(Panel { output, layer, surface, format: None, width: 0, height: 0, targets: None, frame: 0, last_render: Instant::now(), last_history: 0 });
+        self.panels.push(Panel { output, layer, surface, format: None, width: 0, height: 0, targets: None, frame: 0 });
     }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
     fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
@@ -572,8 +603,9 @@ impl ProvidesRegistryState for App {
 smithay_client_toolkit::delegate_dispatch2!(App);
 
 /// hyprpeach's announcements, off Hyprland's event socket: the library's
-/// `hyprpeach-desktop,N` after every desk switch, and the overview's
-/// `hyprpeach-overview,open` and `,closed`. Listening to announcements rather
+/// `hyprpeach-desktop,N` after every desk switch, the overview's
+/// `hyprpeach-overview,open` and `,closed`, and `hyprpeach-scene,<name>` from
+/// `hyprpeach scene`. Listening to announcements rather
 /// than to raw workspace changes is what keeps a focus move from reading as a
 /// switch -- the bug 2.1.1 fixed by the same route.
 fn listen_to_hyprpeach() -> mpsc::Receiver<Announcement> {
@@ -589,6 +621,8 @@ fn listen_to_hyprpeach() -> mpsc::Receiver<Announcement> {
             let Some(event) = line.strip_prefix("custom>>") else { continue };
             let announcement = if let Some(desktop) = event.strip_prefix("hyprpeach-desktop,") {
                 desktop.trim().parse().ok().map(Announcement::Desktop)
+            } else if let Some(scene) = event.strip_prefix("hyprpeach-scene,") {
+                Some(Announcement::Scene(scene.trim().to_string()))
             } else {
                 match event.trim() {
                     "hyprpeach-overview,open" => Some(Announcement::Overview(true)),
@@ -612,6 +646,26 @@ fn active_workspace() -> i32 {
         .and_then(|text| text.split("\"id\":").nth(1).map(|s| s.trim().split(|c: char| !c.is_ascii_digit()).next().unwrap_or("1").to_string()))
         .and_then(|s| s.parse().ok())
         .unwrap_or(1)
+}
+
+/// The scene last picked, kept across restarts in
+/// $XDG_STATE_HOME/hyprpeach/orbit.json as `{ "scene": "<name>" }`. Written by
+/// this program alone, so it is read with a plain search, not a JSON parser.
+fn remembered_scene_path() -> PathBuf {
+    let state = std::env::var("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state"));
+    state.join("hyprpeach/orbit.json")
+}
+
+fn remembered_scene() -> Option<String> {
+    let text = std::fs::read_to_string(remembered_scene_path()).ok()?;
+    let after = text.split("\"scene\"").nth(1)?;
+    after.split('"').nth(1).map(String::from)
+}
+
+fn remember_scene(name: &str) {
+    let path = remembered_scene_path();
+    if let Some(directory) = path.parent() { let _ = std::fs::create_dir_all(directory); }
+    let _ = std::fs::write(path, format!("{{ \"scene\": \"{name}\" }}\n"));
 }
 
 fn main() {
@@ -684,7 +738,6 @@ fn main() {
         label: None,
         entries: &[uniform_entry(0), texture_entry(1), texture_entry(2), sampler_entry(3)],
     });
-    let scene_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("scene"), source: wgpu::ShaderSource::Wgsl(include_str!("scene.wgsl").into()) });
     let post_module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("post"), source: wgpu::ShaderSource::Wgsl(include_str!("post.wgsl").into()) });
     let scene_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&scene_layout), Some(&planet_layout)], immediate_size: 0 });
     let post_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&post_layout)], immediate_size: 0 });
@@ -693,7 +746,8 @@ fn main() {
         alpha: wgpu::BlendComponent::REPLACE,
     };
     let pipelines = Pipelines {
-        scene: fullscreen_pipeline(&device, &scene_pipeline_layout, &scene_module, "fs", HDR, None),
+        scenes: HashMap::new(),
+        scene_pipeline_layout,
         taa: fullscreen_pipeline(&device, &post_pipeline_layout, &post_module, "taa", HDR, None),
         bloom_down: fullscreen_pipeline(&device, &post_pipeline_layout, &post_module, "bloomDown", HDR, None),
         bloom_up: fullscreen_pipeline(&device, &post_pipeline_layout, &post_module, "bloomUp", HDR, Some(additive)),
@@ -706,8 +760,16 @@ fn main() {
         sampler,
     };
 
+    let common = include_str!("common.wgsl");
+    let scene_file = std::env::var("HYPRPEACH_SCENE_FILE").ok().map(|path| {
+        let name = Path::new(&path).file_stem().and_then(|s| s.to_str()).unwrap_or("file").to_string();
+        (name, std::fs::read_to_string(&path).expect("HYPRPEACH_SCENE_FILE"))
+    });
+    let mut scene_sources: HashMap<String, String> = SCENES.iter().map(|(name, source)| (name.to_string(), format!("{common}\n{source}"))).collect();
+    if let Some((name, source)) = &scene_file { scene_sources.insert(name.clone(), format!("{common}\n{source}")); }
+
     let now = Instant::now();
-    let mut camera = Camera { heading_from: FIRST_HEADING, heading_to: FIRST_HEADING, started: now };
+    let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: now };
     // Where the desk already is: the workspace's place in its band of ten.
     let desktop = std::env::var("HYPRPEACH_DESKTOP").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
         let within = (active_workspace() - 1).rem_euclid(10) + 1;
@@ -732,10 +794,21 @@ fn main() {
         camera,
         announcements: listen_to_hyprpeach(),
         overview: std::env::var("HYPRPEACH_OVERVIEW").is_ok(),
+        scene: String::new(),
+        scene_sources,
         scale,
         frames: 0,
         last_report: now,
     };
+    // HYPRPEACH_SCENE_FILE, for writing a scene: that file, read now, in place
+    // of the compiled-in scene of the same name -- no rebuild to try a change.
+    // HYPRPEACH_SCENE picks one by name without remembering it.
+    let first = std::env::var("HYPRPEACH_SCENE").ok().or_else(remembered_scene).unwrap_or_else(|| DEFAULT_SCENE.to_string());
+    let first = scene_file.as_ref().map(|(name, _)| name.clone()).unwrap_or(first);
+    if !app.prepare_scene(&first) && !app.prepare_scene(DEFAULT_SCENE) {
+        panic!("not even the default scene compiles");
+    }
+    app.scene = if app.pipelines.scenes.contains_key(&first) { first } else { DEFAULT_SCENE.to_string() };
     loop {
         event_queue.blocking_dispatch(&mut app).expect("dispatch");
     }
@@ -745,36 +818,41 @@ fn main() {
 mod tests {
     use super::*;
 
-    /// The turn from one desktop to another, in frames.
-    fn turn(from: i32, to: i32) -> f32 {
+    /// The step from one desktop to another, in desktops.
+    fn step(from: i32, to: i32) -> f32 {
         let long_ago = Instant::now() - std::time::Duration::from_secs(60);
-        let mut camera = Camera { heading_from: FIRST_HEADING, heading_to: FIRST_HEADING, started: long_ago };
+        let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: long_ago };
         camera.aim(from, long_ago);
-        let (heading, _) = camera.at(Instant::now());
+        let (position, _) = camera.at(Instant::now());
         camera.aim(to, Instant::now());
-        (camera.heading_to - heading) / FRAME
+        camera.position_to - position
     }
 
     #[test]
-    fn every_next_desktop_is_one_frame_to_the_right() {
+    fn every_next_desktop_is_one_step_forward() {
         for from in 1..=9 {
             let to = from % 9 + 1;
-            assert!((turn(from, to) + 1.0).abs() < 1e-4, "{from} -> {to}: {}", turn(from, to));
+            assert!((step(from, to) - 1.0).abs() < 1e-4, "{from} -> {to}: {}", step(from, to));
         }
     }
 
     #[test]
     fn nine_to_one_is_no_different_from_one_to_two() {
-        assert!((turn(9, 1) - turn(1, 2)).abs() < 1e-4);
-        assert!((turn(3, 4) - turn(1, 2)).abs() < 1e-4);
+        assert!((step(9, 1) - step(1, 2)).abs() < 1e-4);
+        assert!((step(3, 4) - step(1, 2)).abs() < 1e-4);
     }
 
     #[test]
-    fn no_jump_turns_more_than_four_frames() {
+    fn no_jump_is_longer_than_four() {
         for from in 1..=9 {
             for to in 1..=9 {
-                assert!(turn(from, to).abs() <= 4.0 + 1e-4, "{from} -> {to}: {}", turn(from, to));
+                assert!(step(from, to).abs() <= 4.0 + 1e-4, "{from} -> {to}: {}", step(from, to));
             }
         }
+    }
+
+    #[test]
+    fn the_default_scene_is_one_of_the_scenes() {
+        assert!(SCENES.iter().any(|(name, _)| *name == DEFAULT_SCENE));
     }
 }

@@ -24,7 +24,7 @@ die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
 # What the build was made from: the renderer's own files, hashed. Not a git
 # revision, because the stamp has to mean the same thing in any copy.
 source_stamp() {
-  (cd "$HERE/renderer" && cat Cargo.toml Cargo.lock src/*) | sha256sum | cut -d' ' -f1
+  (cd "$HERE/renderer" && cat Cargo.toml Cargo.lock build.rs src/*.rs src/*.wgsl src/scenes/*.wgsl) | sha256sum | cut -d' ' -f1
 }
 
 ready() {

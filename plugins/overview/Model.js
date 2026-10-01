@@ -43,29 +43,21 @@ function logicalRect(monitor) {
   return { x: monitor.x, y: monitor.y, width: width, height: height }
 }
 
-// The desk: every monitor's rectangle together.
-function deskBox(state) {
-  var left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
-  for (var index = 0; index < state.monitors.length; index++) {
-    var r = logicalRect(state.monitors[index])
-    left = Math.min(left, r.x); top = Math.min(top, r.y)
-    right = Math.max(right, r.x + r.width); bottom = Math.max(bottom, r.y + r.height)
-  }
-  if (left === Infinity) return { x: 0, y: 0, width: 1, height: 1 }
-  return { x: left, y: top, width: right - left, height: bottom - top }
-}
-
-// THE GRID IS ONE, ACROSS THE WHOLE DESK -- not a grid per monitor. Every
-// monitor draws its own part of it, so on two stacked panels the middle row
-// crosses the bezel, as one window across the desk would. Each cell is the
-// desk's own shape: a miniature of the whole desk on that desktop.
+// A GRID ON EVERY MONITOR, EACH IN ITS OWN SHAPE. Not one grid across the desk:
+// a desk is not always one rectangle. Two panels stacked make one, but a laptop
+// between two larger monitors, lower than them, makes a wide ragged strip -- a
+// desk-wide grid there runs 40:9 cells across three bezels and the laptop's
+// cells drop out of line with its neighbours'. And off its dock the same laptop
+// is the whole desk. So every monitor shows the nine desktops as THEY ARE ON
+// IT, which reads the same on any of those, and choosing one still turns the
+// whole desk.
 //
 // The SAME arithmetic as plugins/orbit's renderer (overviewCell in
-// scene.wgsl), in desk pixels: 3 x 3 inside 92% x 86% of the desk, gaps of
-// 1.2% of its height, centred. If the two disagree, the orbit scene's
-// viewports and these frames slide apart.
-function deskGrid(state) {
-  var box = deskBox(state)
+// common.wgsl), in the monitor's logical pixels: 3 x 3 inside 92% x 86% of
+// it, gaps of 1.2% of its height, cells in its own aspect, centred. If the two
+// disagree, the orbit scene's viewports and these frames slide apart.
+function monitorGrid(monitor) {
+  var box = logicalRect(monitor)
   var gap = box.height * 0.012
   var aspect = box.width / box.height
   var cellWidth = Math.min((box.width * 0.92 - 2 * gap) / 3, (box.height * 0.86 - 2 * gap) / 3 * aspect)
@@ -93,22 +85,18 @@ function bandStartOf(monitor) {
   return active > 0 ? Math.floor((active - 1) / BAND_WIDTH) * BAND_WIDTH : 0
 }
 
-// Desktop N's windows on EVERY monitor, placed on the desk: the top panel's in
-// the upper part of the cell, the bottom panel's in the lower, where they are.
-function windowsOnDesktop(state, desktop) {
-  var box = deskBox(state)
+// Desktop N's windows on ONE monitor, in that monitor's own pixels.
+function windowsOnMonitorDesktop(state, monitor, desktop) {
+  var on = windowsOn(state, bandStartOf(monitor) + desktop)
   var windows = []
-  for (var index = 0; index < state.monitors.length; index++) {
-    var on = windowsOn(state, bandStartOf(state.monitors[index]) + desktop)
-    for (var w = 0; w < on.length; w++) {
-      windows.push({
-        client: on[w],
-        x: on[w].at[0] - box.x,
-        y: on[w].at[1] - box.y,
-        width: on[w].size[0],
-        height: on[w].size[1]
-      })
-    }
+  for (var index = 0; index < on.length; index++) {
+    windows.push({
+      client: on[index],
+      x: on[index].at[0] - monitor.x,
+      y: on[index].at[1] - monitor.y,
+      width: on[index].size[0],
+      height: on[index].size[1]
+    })
   }
   return windows
 }
@@ -174,9 +162,8 @@ if (typeof module !== "undefined") {
     parse: parse,
     monitorNamed: monitorNamed,
     logicalRect: logicalRect,
-    deskBox: deskBox,
-    deskGrid: deskGrid,
-    windowsOnDesktop: windowsOnDesktop,
+    monitorGrid: monitorGrid,
+    windowsOnMonitorDesktop: windowsOnMonitorDesktop,
     currentDesktop: currentDesktop,
     windowsOn: windowsOn,
     toplevelAddress: toplevelAddress,
