@@ -136,7 +136,7 @@ command_plugin_list() {
       "not added") mark="🌱" ;;
       *) mark="❔" ;;
     esac
-    printf '  %s %-12s %-8s %-16s %s\n' "$mark" "$name" "$(manifest_field "$manifest" version)" "$state" "$(manifest_field "$manifest" name)"
+    printf '  %s %-18s %-8s %-10s %s\n' "$mark" "$name" "$(manifest_field "$manifest" version)" "$state" "$(manifest_field "$manifest" name)"
   done < <(available_plugin_names)
 }
 
@@ -421,26 +421,35 @@ command_upgrade() {
   command_plugin_list
 }
 
-# THE ORBIT'S SCENE. With no name, the scenes this clone carries -- one file
-# each in the renderer's src/scenes/ -- and which is showing. With one, the
-# running renderer is told to change, and it remembers the choice itself
-# ($XDG_STATE_HOME/hyprpeach/orbit.json), refusing a scene it cannot compile.
-command_scene() {
-  local name=${1:-} scenes="$ROOT/plugins/orbit/renderer/src/scenes"
-  local remembered="${XDG_STATE_HOME:-$HOME/.local/state}/hyprpeach/orbit.json"
-  local current
-  current=$(jq -r '.scene // ""' "$remembered" 2>/dev/null || true)
-  if [[ -z $name ]]; then
-    local file scene
-    for file in "$scenes"/*.wgsl; do
-      scene=$(basename "$file" .wgsl)
-      if [[ $scene == "$current" ]]; then say "$scene  (showing)"; else printf '   %s\n' "$scene"; fi
-    done
+# ANIMATED-DESKTOPS SETTINGS: the scene, and how fast a switch is. The file
+# is ~/.config/hyprpeach/animated-desktops.json; what may go in it, and the
+# defaults, are in the plugin's settings.schema.json, which the renderer reads
+# too -- so this offers exactly the choices the renderer accepts.
+#
+# With no value, the choices, the one in effect marked. With one, it is
+# written; the running renderer looks at the file once a second.
+command_setting() {
+  local key=$1 value=${2:-}
+  local schema="$ROOT/plugins/animated-desktops/settings.schema.json"
+  local file="${XDG_CONFIG_HOME:-$HOME/.config}/hyprpeach/animated-desktops.json"
+  local current choice
+  current=$(jq -r --arg key "$key" '.[$key] // empty' "$file" 2>/dev/null || true)
+  [[ -n $current ]] || current=$(jq -r --arg key "$key" '.properties[$key].default' "$schema")
+  if [[ -z $value ]]; then
+    while IFS= read -r choice; do
+      if [[ $choice == "$current" ]]; then say "$choice  (in effect)"; else printf '   %s\n' "$choice"; fi
+    done < <(jq -r --arg key "$key" '.properties[$key].enum[]' "$schema")
     return
   fi
-  [[ -f $scenes/$name.wgsl ]] || die "no scene called $name — \`hyprpeach scene\` lists them"
-  hyprctl eval "hl.dispatch(hl.dsp.event(\"hyprpeach-scene,$name\"))" >/dev/null
-  say "scene: $name"
+  jq -e --arg key "$key" --arg value "$value" '.properties[$key].enum | index($value)' "$schema" >/dev/null \
+    || die "$key $value is not one of: $(jq -r --arg key "$key" '.properties[$key].enum | join(", ")' "$schema")"
+  mkdir -p "$(dirname "$file")"
+  local existing='{}'
+  [[ -s $file ]] && existing=$(cat "$file")
+  jq --arg key "$key" --arg value "$value" --arg schema "$schema" '. + { "$schema": $schema, ($key): $value }' <<< "$existing" > "$file.tmp" \
+    || { rm -f "$file.tmp"; die "$file is not JSON; fix or delete it"; }
+  mv "$file.tmp" "$file"
+  say "$key: $value"
 }
 
 command_help() {
@@ -451,7 +460,8 @@ command_help() {
   hyprpeach plugin add <name>     add one — it updates whenever hyprpeach does
   hyprpeach plugin remove <name>  take one off again
   hyprpeach upgrade               omarchy plugin update, then reload Hyprland
-  hyprpeach scene [name]          the orbit's scenes, or show another
+  hyprpeach scene [name]          animated desktops: the scenes, or show another
+  hyprpeach speed [speed]         animated desktops: calm, quick or snappy switches
   hyprpeach version               the same as plugin list
   hyprpeach link-command          put `hyprpeach` on PATH (the plugin does this itself)
   hyprpeach help                  this
@@ -471,7 +481,8 @@ main() {
       esac
       ;;
     upgrade) command_upgrade ;;
-    scene) command_scene "${2:-}" ;;
+    scene) command_setting scene "${2:-}" ;;
+    speed) command_setting speed "${2:-}" ;;
     version) command_plugin_list ;;
     link-command) command_link_command ;;
     help|-h|--help) command_help ;;

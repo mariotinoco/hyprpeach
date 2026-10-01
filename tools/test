@@ -18,12 +18,12 @@ run "library"   lua tests/hyprpeach.test.lua
 run "install"   bash tests/install.test.sh
 run "overview"  bash tests/overview.test.sh
 run "dev-ports" bash tests/dev-ports.test.sh
-# The orbit renderer's path rules, in Rust. The build directory is the one the
+# The animated-desktops renderer's path rules, in Rust. The build directory is the one the
 # plugin's own prepare uses, so this is a few seconds after the first time.
 if command -v cargo >/dev/null; then
-  run "orbit" env CARGO_TARGET_DIR="$HOME/.cache/hyprpeach/orbit-target" cargo test --release --quiet --manifest-path plugins/orbit/renderer/Cargo.toml
+  run "animated-desktops" env CARGO_TARGET_DIR="$HOME/.cache/hyprpeach/animated-desktops-target" cargo test --release --quiet --manifest-path plugins/animated-desktops/renderer/Cargo.toml
 else
-  failed+=("orbit (no cargo here to run it)")
+  failed+=("animated-desktops (no cargo here to run it)")
 fi
 validate() {
   local folder

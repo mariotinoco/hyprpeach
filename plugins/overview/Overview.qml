@@ -82,7 +82,7 @@ Item {
 
   Process { id: focuser }
 
-  // OPEN AND CLOSED, ANNOUNCED -- for the orbit renderer, which draws each
+  // OPEN AND CLOSED, ANNOUNCED -- for the animated-desktops renderer, which draws each
   // desktop's viewport in the cells this leaves see-through, and has to know
   // when to rise above the windows to do it. SUPER + TAB only says "toggle";
   // this overview is what knows which way it went, and closes on keys and
@@ -93,17 +93,17 @@ Item {
     announcer.running = true
   }
 
-  // Whether the orbit scene is behind the desk (plugins/orbit writes this).
+  // Whether the animated desktops are behind the desk (plugins/animated-desktops writes this).
   // With it, the cells are windows onto the universe rather than onto the
   // wallpaper: no scrim, no picture, only the frames and the live windows.
-  property bool orbit: false
+  property bool animated: false
   FileView {
-    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-orbit"
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated-desktops"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: root.orbit = text().trim() === "running"
-    onLoadFailed: root.orbit = false
+    onLoaded: root.animated = text().trim() === "running"
+    onLoadFailed: root.animated = false
   }
 
   // Held panels, as the library publishes them: "<monitor> <desktop>" lines.
@@ -149,7 +149,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: root.orbit ? "transparent" : Util.alpha(Color.background, 0.94)
+          color: root.animated ? "transparent" : Util.alpha(Color.background, 0.94)
         }
 
         // A click on the space between cells closes it, the way a click off
@@ -187,11 +187,11 @@ Item {
               id: frame
               anchors.fill: parent
               radius: Math.round(cell.height * 0.02)
-              color: root.orbit ? "transparent" : Color.background
+              color: root.animated ? "transparent" : Color.background
               clip: true
 
               Image {
-                visible: !root.orbit
+                visible: !root.animated
                 anchors.fill: parent
                 source: Util.fileUrl(root.backgroundPath)
                 fillMode: Image.PreserveAspectCrop

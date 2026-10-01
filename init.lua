@@ -34,12 +34,11 @@ local peach = {}
 --- because nobody else knows what is on your desk.
 --- NINE DESKTOPS: A 3 x 3, AND NOT A SETTING.
 ---
---- The desk is a torus. Columns are bearings around the station, rows are
---- positions around its orbit, and both wrap -- so every step, 3 -> 4 and
---- 9 -> 1 included, is the same move. The overview draws that grid and the
---- orbit scene flies that path; a desk of seven or twelve desktops has neither,
---- so the number is fixed here rather than offered as an option somebody could
---- set and quietly break both. `0` is not a tenth desktop: it opens the overview.
+--- The overview draws a 3 x 3, and animated-desktops gives each of the nine
+--- its own place in one scene, on a loop where 9 -> 1 is a step like any
+--- other; a desk of seven or twelve desktops has neither, so the number is
+--- fixed here rather than offered as an option somebody could set and quietly
+--- break both. `0` is not a tenth desktop: it opens the overview.
 local DESKTOP_COUNT = 9
 
 --- WHY EACH MONITOR'S BAND IS STILL TEN WORKSPACES WIDE. 2.x had ten desktops,
@@ -375,7 +374,7 @@ function peach.focus_desktop(parameters)
   end
   realign_pinned_windows()
   -- ANNOUNCED, not left to be inferred. Everything that reacts to the desk --
-  -- the number on screen, the overview, the orbit scene -- hears this one event
+  -- the number on screen, the overview, the animated desktops -- hears this one event
   -- per switch. Reading switches off the focused workspace instead mistook
   -- focus moving between two monitors for a switch whenever they showed
   -- different desktops, which a held panel makes the normal case.

@@ -44,7 +44,7 @@ BarWidget {
   moduleName: "hyprpeach.desktops"
 
   // NINE DESKTOPS, ON BANDS TEN WORKSPACES WIDE. Both are fixed in the library
-  // (init.lua says why): nine is the 3 x 3 the overview and the orbit scene are
+  // (init.lua says why): nine is the 3 x 3 the overview and the animated desktops are
   // built on, and ten keeps every workspace number where 2.x put it.
   readonly property int desktopCount: 9
   readonly property int bandWidth: 10

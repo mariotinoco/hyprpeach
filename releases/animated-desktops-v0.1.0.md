@@ -6,7 +6,10 @@ Switching flies you from one place to the next: a surge along the grid, a flight
 
 The picture runs across all your monitors as one, composed around the one at eye level: on two stacked panels the subject sits on the bottom one and the sky goes on up through the top; on a laptop between two larger screens the horizon runs on across both; a laptop on its own gets the whole of it.
 
-    hyprpeach plugin add orbit
+    hyprpeach plugin add animated-desktops
     hyprpeach scene nebula
+    hyprpeach speed snappy
+
+A switch takes 0.8 s however far it goes; `hyprpeach speed` makes it snappier (0.45 s) or calmer (1.6 s).
 
 Needs Rust; the first add builds the renderer. Every frame is drawn fresh — measured at 60 fps on two 7680 × 2160 panels.

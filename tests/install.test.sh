@@ -97,18 +97,21 @@ case "${1:-}" in
   configerrors) echo "" ;;
 esac
 FAKE
-# orbit's prepare builds with cargo. The fake makes the file cargo would make,
+# animated-desktops' prepare builds with cargo. The fake makes the file cargo would make,
 # so the rest of the step runs for real: the stamp, the install, the skip when
 # nothing changed.
 cat > "$FAKES/cargo" <<'FAKE'
 #!/usr/bin/env bash
 printf 'cargo %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
 while (( $# )); do [[ $1 == --target-dir ]] && target=$2; shift; done
-mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-orbit" && chmod +x "$target/release/hyprpeach-orbit"
+mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-animated-desktops" && chmod +x "$target/release/hyprpeach-animated-desktops"
 FAKE
 chmod +x "$FAKES"/*
 
 export HYPRPEACH_TEST_LOG="$LOG"
+# The XDG directories default to under HOME, which is the sandbox's; one set
+# in the environment would point a command straight at the real machine.
+unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME
 export PATH="$FAKES:$OMARCHY_BINARIES:$PATH"
 git_quietly() { git -c user.name=test -c user.email=test@example.invalid -c advice.detachedHead=false "$@"; }
 
@@ -125,6 +128,7 @@ for name in omarchy omarchy-shell hyprctl cargo; do
   [[ $(command -v "$name") == "$FAKES/$name" ]] || { echo "REFUSING TO RUN: $name resolves to $(command -v "$name"), not the fake"; exit 1; }
 done
 [[ $HOME == "$SANDBOX"/* ]] || { echo "REFUSING TO RUN: HOME is $HOME"; exit 1; }
+[[ -z ${XDG_CONFIG_HOME:-} ]] || { echo "REFUSING TO RUN: XDG_CONFIG_HOME is $XDG_CONFIG_HOME"; exit 1; }
 
 # ---------------------------------------------------------------- the remote
 
@@ -335,24 +339,39 @@ echo
 echo "a plugin that builds is prepared before it is linked, and only when stale"
 : > "$LOG"
 # What an earlier build left: the planet scene's NASA imagery.
-mkdir -p "$HOME/.local/share/hyprpeach/orbit/assets" && echo map > "$HOME/.local/share/hyprpeach/orbit/assets/day.jpg"
-hyprpeach plugin add orbit > "$SANDBOX/orbit.out" 2>&1
-check "adding orbit succeeds" "$?" "0"
-check "it is linked" "$(link_of hyprpeach.orbit)" "hyprpeach/plugins/orbit"
+mkdir -p "$HOME/.local/share/hyprpeach/animated-desktops/assets" && echo map > "$HOME/.local/share/hyprpeach/animated-desktops/assets/day.jpg"
+hyprpeach plugin add animated-desktops > "$SANDBOX/animated-desktops.out" 2>&1
+check "adding animated-desktops succeeds" "$?" "0"
+check "it is linked" "$(link_of hyprpeach.animated-desktops)" "hyprpeach/plugins/animated-desktops"
 check "its renderer was built once" "$(grep -c '^cargo build' "$LOG")" "1"
-check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/orbit/hyprpeach-orbit ]] && echo yes)" "yes"
-check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/orbit/assets ]] && echo left || echo gone)" "gone"
+check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-desktops ]] && echo yes)" "yes"
+check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/animated-desktops/assets ]] && echo left || echo gone)" "gone"
 : > "$LOG"
-"$PLUGIN/plugins/orbit/prepare" --if-stale
+"$PLUGIN/plugins/animated-desktops/prepare" --if-stale
 check "starting again with nothing changed builds nothing" "$(grep -c '^cargo' "$LOG")" "0"
-echo "// changed" >> "$SANDBOX/work/plugins/orbit/renderer/src/main.rs"
+echo "// changed" >> "$SANDBOX/work/plugins/animated-desktops/renderer/src/main.rs"
 git_quietly -C "$SANDBOX/work" commit --quiet -am "the renderer changed"
 git -C "$SANDBOX/work" push --quiet "$UPSTREAM" "HEAD:$(git -C "$UPSTREAM" symbolic-ref --short HEAD)"
 omarchy plugin update hyprpeach --yes >/dev/null 2>&1
-"$PLUGIN/plugins/orbit/prepare" --if-stale >/dev/null 2>&1
+"$PLUGIN/plugins/animated-desktops/prepare" --if-stale >/dev/null 2>&1
 check "after an update changes the renderer, it is rebuilt" "$(grep -c '^cargo build' "$LOG")" "1"
-hyprpeach plugin remove orbit >/dev/null 2>&1
-check "orbit comes off" "$([[ -L $(plugins_directory)/hyprpeach.orbit ]] && echo linked || echo none)" "none"
+
+echo
+echo "animated-desktops settings are the schema's choices, written to one file"
+SETTINGS="$HOME/.config/hyprpeach/animated-desktops.json"
+check "with no file, the default speed is in effect" "$(hyprpeach speed | grep -c 'quick  (in effect)')" "1"
+hyprpeach speed snappy >/dev/null 2>&1
+check "a speed is written to the settings file" "$(jq -r .speed "$SETTINGS")" "snappy"
+check "  ...pointing an editor at its schema" "$(jq -r '."$schema"' "$SETTINGS")" "$PLUGIN/plugins/animated-desktops/settings.schema.json"
+hyprpeach speed warp > "$SANDBOX/speed.out" 2>&1
+check "a speed the schema does not offer is refused" "$?" "1"
+check "  ...and the file is left as it was" "$(jq -r .speed "$SETTINGS")" "snappy"
+hyprpeach scene nebula >/dev/null 2>&1
+check "a scene is written beside the speed, not over it" "$(jq -r '.scene + " " + .speed' "$SETTINGS")" "nebula snappy"
+check "the scene list marks the one in effect" "$(hyprpeach scene | grep -c 'nebula  (in effect)')" "1"
+
+hyprpeach plugin remove animated-desktops >/dev/null 2>&1
+check "animated-desktops comes off" "$([[ -L $(plugins_directory)/hyprpeach.animated-desktops ]] && echo linked || echo none)" "none"
 
 echo
 echo "one Omarchy update moves the plugins with it"

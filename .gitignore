@@ -2,4 +2,4 @@
 .claude/
 *.png
 __pycache__/
-plugins/orbit/renderer/target/
+plugins/animated-desktops/renderer/target/

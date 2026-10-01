@@ -1,11 +1,11 @@
-# Orbit
+# Animated Desktops
 
 A living scene behind your desktops: nine places in one world, one for each
 desktop, drawn in real time as one picture across every monitor. Switching
 desktops flies you from one to the next.
 
 ```bash
-hyprpeach plugin add orbit
+hyprpeach plugin add animated-desktops
 ```
 
 It needs [desktops](../../README.md#more-plugins). The first add builds the
@@ -14,8 +14,9 @@ renderer, which takes a few minutes.
 ## Scenes
 
 ```bash
-hyprpeach scene              # the scenes, and which is showing
-hyprpeach scene nebula       # show another; it is remembered
+hyprpeach scene              # the scenes, and which is in effect
+hyprpeach scene nebula       # show another
+hyprpeach speed snappy       # calm, quick (the default) or snappy switches
 ```
 
 **synthwave** (the default) — a neon grid running to a banded sun. Each
@@ -32,6 +33,18 @@ the stars streaking.
 Every desktop looks different from every other, so you know which one you are
 on without reading a number, and the overview's nine cells are nine places
 rather than nine copies of a wallpaper.
+
+## Speed
+
+A switch takes the same time however far it goes — 2 → 8 as long as 2 → 3,
+covering more ground. **quick** (0.8 s) is the default; **snappy** (0.45 s) is
+for when the move is in the way of the work; **calm** (1.6 s) is for watching
+it.
+
+Both settings live in `~/.config/hyprpeach/animated-desktops.json`. The two
+commands write it; you can edit it by hand too, against
+[settings.schema.json](settings.schema.json). Either way it takes effect within
+a second.
 
 ## On your monitors
 
@@ -66,18 +79,18 @@ is untested; `HYPRPEACH_SCALE` (default `0.5`) sets the internal resolution.
 A native renderer — Rust and [wgpu](https://wgpu.rs), in `renderer/` — drawn
 on each monitor's background layer. A scene is one shader in
 `renderer/src/scenes/`; `renderer/src/common.wgsl` says what it has to define.
-The service in `Orbit.qml` keeps the renderer running and rebuilds it when an
+The service in `AnimatedDesktops.qml` keeps the renderer running and rebuilds it when an
 update changes its source; `prepare` does the building.
 
 To see a scene on a desk you do not have, give the renderer that desk's
 `hyprctl -j monitors`:
 
 ```bash
-~/.local/share/hyprpeach/orbit/hyprpeach-orbit preview monitors.json desk.png
+~/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-desktops preview monitors.json desk.png
 ```
 
 `renderer/layouts/` holds the four desks above.
 
-The program lives in `~/.local/share/hyprpeach/orbit` and the build in
+The program lives in `~/.local/share/hyprpeach/animated-desktops` and the build in
 `~/.cache/hyprpeach`. Removing the plugin leaves them; delete those two folders
 to reclaim the space.

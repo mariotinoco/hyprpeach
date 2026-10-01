@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "hyprpeach.orbit",
-  "name": "Orbit",
+  "id": "hyprpeach.animated-desktops",
+  "name": "Animated Desktops",
   "version": "0.1.0",
   "author": "hyprpeach",
   "description": "A living scene behind your desktops — a synthwave grid or a nebula — with a different place for every desktop, one picture across every monitor, and every desktop switch a flight to the next.",
@@ -9,7 +9,7 @@
     "service"
   ],
   "entryPoints": {
-    "service": "Orbit.qml"
+    "service": "AnimatedDesktops.qml"
   },
   "hyprpeach": {
     "requires": ["desktops"],

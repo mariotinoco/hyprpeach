@@ -1,4 +1,4 @@
-//! hyprpeach orbit: a scene drawn natively on every monitor's background
+//! hyprpeach animated-desktops: a scene drawn natively on every monitor's background
 //! layer, as one picture across the desk, composed around the home monitor.
 //!
 //! Wayland layer-shell surfaces (one per output) + wgpu (Vulkan). renderer.rs
@@ -6,17 +6,18 @@
 //! what a scene is. Hyprland's event socket moves the camera and picks the
 //! scene.
 //!
-//! `hyprpeach-orbit preview <monitors.json> <out.png>` draws a desk that need
+//! `hyprpeach-animated-desktops preview <monitors.json> <out.png>` draws a desk that need
 //! not be this one -- the JSON is `hyprctl -j monitors` from any machine --
 //! so a scene can be seen on layouts nobody here owns.
 
 mod layout;
 mod renderer;
+mod settings;
 
 use std::{
     io::{BufRead, BufReader},
     os::unix::net::UnixStream,
-    path::{Path, PathBuf},
+    path::Path,
     ptr::NonNull,
     sync::mpsc,
     time::Instant,
@@ -42,9 +43,6 @@ use wayland_client::{
     Connection, Proxy, QueueHandle,
 };
 
-/// Shown until someone picks another with `hyprpeach scene <name>`.
-const DEFAULT_SCENE: &str = "synthwave";
-
 /// Where the desk is, in desktops, and where it is going.
 ///
 /// Desktop N is position N - 1, and every scene repeats every 9. Every move
@@ -54,6 +52,8 @@ struct Camera {
     position_from: f32,
     position_to: f32,
     started: Instant,
+    /// How long a switch takes: the person's speed setting.
+    seconds: f32,
 }
 
 const DESKTOP_COUNT: f32 = 9.0;
@@ -65,8 +65,6 @@ fn shortest(from: f32, to: f32) -> f32 {
 }
 
 impl Camera {
-    const SECONDS: f32 = 1.6;
-
     fn aim(&mut self, desktop: i32, now: Instant) {
         let (position, _) = self.at(now);
         self.position_from = position;
@@ -76,7 +74,7 @@ impl Camera {
 
     /// Position, and how hard the camera is moving (0..1).
     fn at(&self, now: Instant) -> (f32, f32) {
-        let progress = ((now - self.started).as_secs_f32() / Self::SECONDS).clamp(0.0, 1.0);
+        let progress = ((now - self.started).as_secs_f32() / self.seconds).clamp(0.0, 1.0);
         let eased = progress * progress * progress * (progress * (progress * 6.0 - 15.0) + 10.0);
         (self.position_from + (self.position_to - self.position_from) * eased, (progress * std::f32::consts::PI).sin())
     }
@@ -86,7 +84,6 @@ impl Camera {
 enum Announcement {
     Desktop(i32),
     Overview(bool),
-    Scene(String),
     /// A monitor came or went: where everything looks from is read again.
     Monitors,
 }
@@ -117,6 +114,8 @@ struct App {
     announcements: mpsc::Receiver<Announcement>,
     overview: bool,
     scene: String,
+    settings_checked: Instant,
+    settings_modified: Option<std::time::SystemTime>,
     frames: u32,
     last_report: Instant,
 }
@@ -157,17 +156,26 @@ impl App {
                         panel.layer.set_layer(if open { Layer::Top } else { Layer::Background });
                     }
                 }
-                Announcement::Scene(name) => {
-                    if self.renderer.prepare_scene(&name) {
-                        self.scene = name;
-                        remember_scene(&self.scene);
-                    }
-                }
                 Announcement::Monitors => self.monitors = read_monitors(),
                 _ => {}
             }
         }
         let now = Instant::now();
+        // THE SETTINGS FILE, looked at once a second: `hyprpeach scene`,
+        // `hyprpeach speed` and a hand edit all land the same way, with no
+        // message to send and none to miss.
+        if now.duration_since(self.settings_checked).as_secs_f32() >= 1.0 {
+            self.settings_checked = now;
+            let modified = std::fs::metadata(settings::path()).and_then(|metadata| metadata.modified()).ok();
+            if modified != self.settings_modified {
+                self.settings_modified = modified;
+                let settings = settings::read();
+                self.camera.seconds = settings.speed.seconds();
+                if std::env::var("HYPRPEACH_SCENE").is_err() && settings.scene != self.scene && self.renderer.prepare_scene(&settings.scene) {
+                    self.scene = settings.scene;
+                }
+            }
+        }
         let (position, motion) = self.camera.at(now);
         let name = self.output_state.info(&self.panels[index].output).and_then(|info| info.name).unwrap_or_default();
         let Some((panes, stage)) = layout::placements(&self.monitors) else { return };
@@ -297,8 +305,7 @@ smithay_client_toolkit::delegate_dispatch2!(App);
 
 /// hyprpeach's announcements, off Hyprland's event socket: the library's
 /// `hyprpeach-desktop,N` after every desk switch, the overview's
-/// `hyprpeach-overview,open` and `,closed`, `hyprpeach-scene,<name>` from
-/// `hyprpeach scene`, and Hyprland's own word that a monitor came or went.
+/// `hyprpeach-overview,open` and `,closed`, and Hyprland's own word that a monitor came or went.
 /// Listening to announcements rather than to raw workspace changes is what
 /// keeps a focus move from reading as a switch -- the bug 2.1.1 fixed by the
 /// same route.
@@ -317,8 +324,6 @@ fn listen_to_hyprpeach() -> mpsc::Receiver<Announcement> {
             } else if let Some(event) = line.strip_prefix("custom>>") {
                 if let Some(desktop) = event.strip_prefix("hyprpeach-desktop,") {
                     desktop.trim().parse().ok().map(Announcement::Desktop)
-                } else if let Some(scene) = event.strip_prefix("hyprpeach-scene,") {
-                    Some(Announcement::Scene(scene.trim().to_string()))
                 } else {
                     match event.trim() {
                         "hyprpeach-overview,open" => Some(Announcement::Overview(true)),
@@ -335,29 +340,6 @@ fn listen_to_hyprpeach() -> mpsc::Receiver<Announcement> {
         }
     });
     receiver
-}
-
-/// The scene last picked, kept across restarts in
-/// $XDG_STATE_HOME/hyprpeach/orbit.json as `{ "scene": "<name>" }`.
-fn remembered_scene_path() -> PathBuf {
-    let state = std::env::var("XDG_STATE_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state"));
-    state.join("hyprpeach/orbit.json")
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct Remembered {
-    scene: String,
-}
-
-fn remembered_scene() -> Option<String> {
-    let text = std::fs::read_to_string(remembered_scene_path()).ok()?;
-    serde_json::from_str::<Remembered>(&text).ok().map(|remembered| remembered.scene)
-}
-
-fn remember_scene(name: &str) {
-    let path = remembered_scene_path();
-    if let Some(directory) = path.parent() { let _ = std::fs::create_dir_all(directory); }
-    let _ = std::fs::write(path, serde_json::to_string(&Remembered { scene: name.to_string() }).unwrap() + "\n");
 }
 
 fn gpu() -> (wgpu::Instance, wgpu::Adapter, wgpu::Device, wgpu::Queue) {
@@ -387,13 +369,13 @@ fn scene_file() -> Option<(String, String)> {
 }
 
 /// The scene to start on: a file being written, then HYPRPEACH_SCENE, then the
-/// one last picked, then the default -- the first of those that compiles.
+/// settings' choice, then the default -- the first of those that compiles.
 fn first_scene(renderer: &mut Renderer, scene_file: &Option<(String, String)>) -> String {
     let candidates = [
         scene_file.as_ref().map(|(name, _)| name.clone()),
         std::env::var("HYPRPEACH_SCENE").ok(),
-        remembered_scene(),
-        Some(DEFAULT_SCENE.to_string()),
+        Some(settings::read().scene),
+        Some(settings::default_scene()),
     ];
     candidates.into_iter().flatten().find(|name| renderer.prepare_scene(name)).expect("not even the default scene compiles")
 }
@@ -451,7 +433,7 @@ fn main() {
     let arguments: Vec<String> = std::env::args().collect();
     if arguments.get(1).map(String::as_str) == Some("preview") {
         let (Some(monitors), Some(output)) = (arguments.get(2), arguments.get(3)) else {
-            eprintln!("usage: hyprpeach-orbit preview <monitors.json> <out.png>");
+            eprintln!("usage: hyprpeach-animated-desktops preview <monitors.json> <out.png>");
             std::process::exit(2);
         };
         return preview(monitors, output);
@@ -467,16 +449,10 @@ fn main() {
     let file = scene_file();
     let mut renderer = Renderer::new(device, queue, scale, file.clone());
     let scene = first_scene(&mut renderer, &file);
-    // A remembered scene that is gone (or no longer compiles) fell back to
-    // another; record what is really showing, so `hyprpeach scene` says so.
-    // Not for a scene picked from the environment, which is only for now.
-    if file.is_none() && std::env::var("HYPRPEACH_SCENE").is_err() && remembered_scene().as_deref() != Some(scene.as_str()) {
-        remember_scene(&scene);
-    }
 
     let monitors = read_monitors();
     let now = Instant::now();
-    let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: now };
+    let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: now, seconds: settings::read().speed.seconds() };
     let desktop = environment_number("HYPRPEACH_DESKTOP").map(|desktop| desktop as i32).unwrap_or_else(|| layout::current_desktop(&monitors));
     camera.aim(desktop, now - std::time::Duration::from_secs(10));
 
@@ -496,6 +472,8 @@ fn main() {
         announcements: listen_to_hyprpeach(),
         overview: std::env::var("HYPRPEACH_OVERVIEW").is_ok(),
         scene,
+        settings_checked: now,
+        settings_modified: std::fs::metadata(settings::path()).and_then(|metadata| metadata.modified()).ok(),
         frames: 0,
         last_report: now,
     };
@@ -507,12 +485,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use renderer::SCENES;
 
     /// The step from one desktop to another, in desktops.
     fn step(from: i32, to: i32) -> f32 {
         let long_ago = Instant::now() - std::time::Duration::from_secs(60);
-        let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: long_ago };
+        let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: long_ago, seconds: 0.8 };
         camera.aim(from, long_ago);
         let (position, _) = camera.at(Instant::now());
         camera.aim(to, Instant::now());
@@ -542,8 +519,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_default_scene_is_one_of_the_scenes() {
-        assert!(SCENES.iter().any(|(name, _)| *name == DEFAULT_SCENE));
-    }
 }

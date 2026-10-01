@@ -52,10 +52,10 @@ function logicalRect(monitor) {
 // IT, which reads the same on any of those, and choosing one still turns the
 // whole desk.
 //
-// The SAME arithmetic as plugins/orbit's renderer (overviewCell in
+// The SAME arithmetic as plugins/animated-desktops's renderer (overviewCell in
 // common.wgsl), in the monitor's logical pixels: 3 x 3 inside 92% x 86% of
 // it, gaps of 1.2% of its height, cells in its own aspect, centred. If the two
-// disagree, the orbit scene's viewports and these frames slide apart.
+// disagree, the animated desktop in each cell and these frames slide apart.
 function monitorGrid(monitor) {
   var box = logicalRect(monitor)
   var gap = box.height * 0.012

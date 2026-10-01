@@ -614,7 +614,15 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
     // Speed smears the cross lines along the travel: half a frame's worth, a
     // film camera's shutter. A whole frame floods the floor into one colour.
     let smear = STEP_CELLS * motion * 0.008;
-    let lines = gridLines(across, acrossFootprint, 0.02, 0.0) + gridLines(along, depthFootprint, 0.02, smear);
+    // NEAR THE VIEWER THE GRID DIMS. The nearest cells fill the bottom of the
+    // screen -- the strip left showing under and between windows -- and their
+    // cross lines are the fastest-moving thing in the scene: bright bands
+    // sweeping through that strip read as flashes at the edge of the eye.
+    // The far grid carries the look; the near one is a hint of it, the cross
+    // lines (which move) dimmer than the lines running away (which do not).
+    let nearness = 1.0 - smoothstep(5.0, 13.0, depth);
+    let lines = gridLines(across, acrossFootprint, 0.02, 0.0) * (1.0 - 0.55 * nearness)
+              + gridLines(along, depthFootprint, 0.02, smear) * (1.0 - 0.85 * nearness);
 
     // Light trails: vehicles on a few lanes, each a hot head and a fading tail.
     let lane = round(across / 4.0);
@@ -628,7 +636,7 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
     let tail = select(0.0, pow(1.0 - behind / tailLength, 2.5), behind < tailLength);
     let trailWidth = gridLines(across / 4.0, acrossFootprint / 4.0, 0.012, 0.0) * step(0.4, fract(laneHash * 91.0));
     let trailColour = select(palette.accent, vec3<f32>(1.6, 0.35, 0.15), fract(laneHash * 53.0) > 0.6);
-    let trail = trailColour * trailWidth * tail * 2.2;
+    let trail = trailColour * trailWidth * tail * 2.2 * (1.0 - 0.7 * nearness);
 
     // Gloss: the distance mirrored in the floor, stretched downward and
     // blurred, strongest at grazing angles as a real sheen is.

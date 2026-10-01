@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Keeps the orbit renderer running behind the desk.
+// Keeps the animated-desktops renderer running behind the desk.
 //
 // The scene is drawn by a native program (renderer/, Rust and wgpu) rather
 // than in QML: temporal anti-aliasing and bloom need history buffers and a
@@ -13,7 +13,7 @@ Item {
   id: root
 
   readonly property string pluginDirectory: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
-  readonly property string dataDirectory: Quickshell.env("HOME") + "/.local/share/hyprpeach/orbit"
+  readonly property string dataDirectory: Quickshell.env("HOME") + "/.local/share/hyprpeach/animated-desktops"
   property int failures: 0
 
   // `--if-stale`: returns at once when the build matches the source. After an
@@ -25,13 +25,13 @@ Item {
     stderr: StdioCollector { id: prepareErrors; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode === 0) renderer.running = true
-      else console.warn("hyprpeach orbit: prepare failed:", prepareErrors.text)
+      else console.warn("hyprpeach animated-desktops: prepare failed:", prepareErrors.text)
     }
   }
 
   Process {
     id: renderer
-    command: [root.dataDirectory + "/hyprpeach-orbit"]
+    command: [root.dataDirectory + "/hyprpeach-animated-desktops"]
     onRunningChanged: marker.setText(renderer.running ? "running\n" : "")
     // A renderer that falls over is started again, backing off, and given up
     // on after five tries rather than spinning a GPU driver bug into a loop.
@@ -51,7 +51,7 @@ Item {
   // cells see-through for the renderer to draw the viewports in.
   FileView {
     id: marker
-    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-orbit"
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated-desktops"
     printErrors: false
   }
 

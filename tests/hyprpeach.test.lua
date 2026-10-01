@@ -156,7 +156,7 @@ do
   local peach, recorder = fresh_peach({})
   peach.focus_desktop({ desktop = 4 })
   local events = recorder.events
-  -- The number on screen, the overview and the orbit scene all hear this; one
+  -- The number on screen, the overview and the animated desktops all hear this; one
   -- per switch, however many panels moved.
   check({ label = "one event for a two-panel switch", got = #events, want = 1 })
   check({ label = "  ...naming the desktop", got = events[1], want = "hyprpeach-desktop,4" })
