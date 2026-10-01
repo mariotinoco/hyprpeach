@@ -6,15 +6,15 @@ import Quickshell.Wayland
 import qs.Commons
 import "Model.js" as Model
 
-// Every desktop at once, on every monitor, each monitor showing its own.
+// Every desktop at once, as ONE grid across the whole desk.
 //
-// SUPER + TAB fires a Hyprland custom event (peach.toggle_overview in init.lua),
-// and every shell instance hears it on the event socket, so each monitor opens
-// together -- an overview on one screen of a desk is half an overview. Each
-// monitor draws a grid of ITS desktops, with live pictures of the windows on
-// them, and choosing one turns the whole desk through the same
-// peach.focus_desktop the number keys use. Picking desktop 4 on the top screen
-// and on the bottom screen mean the same thing, because on this desk they are.
+// SUPER + TAB or SUPER + 0 fires a Hyprland custom event (peach.toggle_overview
+// in init.lua), and every shell instance hears it, so every monitor opens
+// together. The grid is laid out on the DESK, not on each monitor: every
+// monitor draws its own part of it, the way the desk is one window when you
+// work. Each cell is that desktop in miniature -- its windows from every
+// monitor, where they sit -- and choosing one turns the whole desk through the
+// same peach.focus_desktop the number keys use.
 //
 // WHY THE WINDOWS ARE CAPTURED ONE BY ONE. Hyprland does not render a
 // workspace nobody is looking at, so there is no picture of a hidden desktop to
@@ -120,6 +120,9 @@ Item {
     onLoadFailed: root.heldPanels = ({})
   }
 
+  readonly property var grid: Model.deskGrid(root.state)
+  readonly property int current: Model.currentDesktop(root.state)
+
   Variants {
     model: Quickshell.screens
 
@@ -129,24 +132,11 @@ Item {
         required property var modelData
         screen: modelData
 
-        readonly property string monitorName: panel.screen ? String(panel.screen.name || "") : ""
-        readonly property var monitor: Model.monitorNamed(root.state, panel.monitorName)
-        readonly property var desktops: Model.desktopsOf(root.state, panel.monitorName)
-        readonly property int activeWorkspaceId: panel.monitor && panel.monitor.activeWorkspace ? panel.monitor.activeWorkspace.id : -1
-        readonly property bool held: root.heldPanels[panel.monitorName] !== undefined
-
-        readonly property int gap: Math.round(panel.height * 0.012)
-        readonly property var grid: Model.gridFor({
-          width: panel.width * 0.92,
-          height: panel.height * 0.86,
-          gap: panel.gap,
-          aspect: panel.width / Math.max(1, panel.height)
-        })
-        // Against the screen's LOGICAL width, which is what this window is and
-        // what Hyprland reports window positions in. The monitor's `width` is
-        // its pixels: equal at scale 1, and twice too wide at scale 2, or the
-        // wrong axis altogether on a rotated panel.
-        readonly property real scale: panel.width > 0 ? panel.grid.cellWidth / panel.width : 0
+        // Where this monitor sits on the desk, so the one grid can be drawn
+        // through it at the right offset.
+        readonly property var monitor: Model.monitorNamed(root.state, panel.screen ? String(panel.screen.name || "") : "")
+        readonly property real offsetX: panel.monitor ? panel.monitor.x - root.grid.box.x : 0
+        readonly property real offsetY: panel.monitor ? panel.monitor.y - root.grid.box.y : 0
 
         visible: root.opened
         color: "transparent"
@@ -185,133 +175,114 @@ Item {
           }
         }
 
-        Item {
-          id: gridArea
-          width: panel.grid.columns * panel.grid.cellWidth + (panel.grid.columns - 1) * panel.gap
-          height: panel.grid.rows * panel.grid.cellHeight + (panel.grid.rows - 1) * panel.gap
-          anchors.centerIn: parent
+        Repeater {
+          model: root.grid.cells
 
-          Repeater {
-            model: panel.desktops
+          delegate: Item {
+            id: cell
+            required property var modelData
+            readonly property bool current: cell.modelData.desktop === root.current
+            readonly property var windows: root.opened ? Model.windowsOnDesktop(root.state, cell.modelData.desktop) : []
 
-            delegate: Item {
-              id: cell
-              required property var modelData
-              required property int index
-              readonly property bool current: cell.modelData.workspaceId === panel.activeWorkspaceId
-              readonly property var windows: Model.windowsOn(root.state, cell.modelData.workspaceId)
+            // The desk's grid, seen through this monitor: cells off this
+            // screen land outside it and are simply not drawn here.
+            x: cell.modelData.x - panel.offsetX
+            y: cell.modelData.y - panel.offsetY
+            width: cell.modelData.width
+            height: cell.modelData.height
 
-              readonly property var place: Model.cellPlace({ index: cell.index, count: panel.desktops.length, columns: panel.grid.columns })
-              x: cell.place.column * (panel.grid.cellWidth + panel.gap)
-              y: cell.place.row * (panel.grid.cellHeight + panel.gap)
-              width: panel.grid.cellWidth
-              height: panel.grid.cellHeight
+            Rectangle {
+              id: frame
+              anchors.fill: parent
+              radius: Math.round(cell.height * 0.02)
+              color: root.orbit ? "transparent" : Color.background
+              clip: true
 
-              Rectangle {
-                id: frame
+              Image {
+                visible: !root.orbit
                 anchors.fill: parent
-                radius: Math.round(panel.grid.cellHeight * 0.03)
-                color: root.orbit ? "transparent" : Color.background
-                clip: true
+                source: Util.fileUrl(root.backgroundPath)
+                fillMode: Image.PreserveAspectCrop
+                sourceSize: Qt.size(cell.width, cell.height)
+                asynchronous: true
+                cache: true
+                opacity: 0.8
+              }
 
-                Image {
-                  visible: !root.orbit
-                  anchors.fill: parent
-                  source: Util.fileUrl(root.backgroundPath)
-                  fillMode: Image.PreserveAspectCrop
-                  sourceSize: Qt.size(panel.grid.cellWidth, panel.grid.cellHeight)
-                  asynchronous: true
-                  cache: true
-                  opacity: 0.8
-                }
+              Repeater {
+                model: cell.windows
+                delegate: Item {
+                  id: thumbnail
+                  required property var modelData
+                  readonly property var toplevel: root.opened ? root.toplevelFor(thumbnail.modelData.client.address) : null
+                  x: thumbnail.modelData.x * root.grid.scale
+                  y: thumbnail.modelData.y * root.grid.scale
+                  width: Math.max(1, thumbnail.modelData.width * root.grid.scale)
+                  height: Math.max(1, thumbnail.modelData.height * root.grid.scale)
 
-                Repeater {
-                  model: cell.windows
-                  delegate: Item {
-                    id: thumbnail
-                    required property var modelData
-                    readonly property var toplevel: root.opened ? root.toplevelFor(thumbnail.modelData.address) : null
-                    x: (thumbnail.modelData.at[0] - (panel.monitor ? panel.monitor.x : 0)) * panel.scale
-                    y: (thumbnail.modelData.at[1] - (panel.monitor ? panel.monitor.y : 0)) * panel.scale
-                    width: Math.max(1, thumbnail.modelData.size[0] * panel.scale)
-                    height: Math.max(1, thumbnail.modelData.size[1] * panel.scale)
-
-                    // Until a frame arrives, or if one never does: the window's
-                    // class, where the window is, so the layout still reads.
-                    Rectangle {
-                      anchors.fill: parent
-                      visible: !view.hasContent
-                      color: Util.alpha(Color.foreground, 0.08)
-                      border.color: Util.alpha(Color.foreground, 0.25)
-                      Text {
-                        anchors.centerIn: parent
-                        width: parent.width - 8
-                        elide: Text.ElideRight
-                        horizontalAlignment: Text.AlignHCenter
-                        text: thumbnail.modelData.class || ""
-                        color: Color.foreground
-                        font.family: Style.font.family
-                        font.pixelSize: Math.max(9, Math.min(parent.height * 0.18, 18))
-                      }
+                  // Until a frame arrives, or if one never does: the window's
+                  // class, where the window is, so the layout still reads.
+                  Rectangle {
+                    anchors.fill: parent
+                    visible: !view.hasContent
+                    color: Util.alpha(Color.foreground, 0.08)
+                    border.color: Util.alpha(Color.foreground, 0.25)
+                    Text {
+                      anchors.centerIn: parent
+                      width: parent.width - 8
+                      elide: Text.ElideRight
+                      horizontalAlignment: Text.AlignHCenter
+                      text: thumbnail.modelData.client.class || ""
+                      color: Color.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Math.max(9, Math.min(parent.height * 0.18, 18))
                     }
+                  }
 
-                    // LIVE, AND IT MUST STAY LIVE. A video playing on a desktop
-                    // you are not on keeps playing here -- measured, and the
-                    // best thing this view does. `live` is what asks for every
-                    // new frame rather than the first; do not trade it for a
-                    // still to save work without seeing what it costs.
-                    ScreencopyView {
-                      id: view
-                      anchors.fill: parent
-                      captureSource: thumbnail.toplevel ? thumbnail.toplevel.wayland : null
-                      live: root.opened
-                      constraintSize: Qt.size(thumbnail.width, thumbnail.height)
-                    }
+                  // LIVE, AND IT MUST STAY LIVE. A video playing on a desktop
+                  // you are not on keeps playing here -- measured, and the
+                  // best thing this view does. `live` is what asks for every
+                  // new frame rather than the first; do not trade it for a
+                  // still to save work without seeing what it costs.
+                  ScreencopyView {
+                    id: view
+                    anchors.fill: parent
+                    captureSource: thumbnail.toplevel ? thumbnail.toplevel.wayland : null
+                    live: root.opened
+                    constraintSize: Qt.size(thumbnail.width, thumbnail.height)
                   }
                 }
               }
+            }
 
-              // The border is drawn over the pictures, not under them, or a
-              // window filling the desktop would hide which cell is current.
-              Rectangle {
-                anchors.fill: parent
-                radius: frame.radius
-                color: "transparent"
-                border.width: cell.current ? Math.max(3, Math.round(panel.grid.cellHeight * 0.008)) : (hover.containsMouse ? 2 : 1)
-                border.color: cell.current ? Color.foreground
-                  : Util.alpha(Color.foreground, hover.containsMouse ? 0.7 : 0.2)
-              }
+            // The border is drawn over the pictures, not under them, or a
+            // window filling the desktop would hide which cell is current.
+            Rectangle {
+              anchors.fill: parent
+              radius: frame.radius
+              color: "transparent"
+              border.width: cell.current ? Math.max(3, Math.round(cell.height * 0.006)) : (hover.containsMouse ? 2 : 1)
+              border.color: cell.current ? Color.foreground
+                : Util.alpha(Color.foreground, hover.containsMouse ? 0.7 : 0.25)
+            }
 
-              Text {
-                anchors { left: parent.left; bottom: parent.bottom; margins: Math.round(panel.grid.cellHeight * 0.05) }
-                text: String(cell.modelData.desktop)
-                color: Color.foreground
-                style: Text.Outline
-                styleColor: Util.alpha(Color.background, 0.8)
-                font.family: Style.font.family
-                font.bold: true
-                font.pixelSize: Math.round(panel.grid.cellHeight * 0.16)
-              }
+            Text {
+              anchors { left: parent.left; bottom: parent.bottom; margins: Math.round(cell.height * 0.04) }
+              text: String(cell.modelData.desktop)
+              color: Color.foreground
+              style: Text.Outline
+              styleColor: Util.alpha(Color.background, 0.8)
+              font.family: Style.font.family
+              font.bold: true
+              font.pixelSize: Math.round(cell.height * 0.12)
+            }
 
-              // A held panel does not follow the desk, so its cells say so.
-              Text {
-                visible: panel.held && cell.current
-                anchors { right: parent.right; top: parent.top; margins: Math.round(panel.grid.cellHeight * 0.05) }
-                text: "held"
-                color: Color.foreground
-                style: Text.Outline
-                styleColor: Util.alpha(Color.background, 0.8)
-                font.family: Style.font.family
-                font.pixelSize: Math.round(panel.grid.cellHeight * 0.09)
-              }
-
-              MouseArea {
-                id: hover
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.focusDesktop(cell.modelData.desktop)
-              }
+            MouseArea {
+              id: hover
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.focusDesktop(cell.modelData.desktop)
             }
           }
         }

@@ -29,25 +29,99 @@ function monitorNamed(state, name) {
 }
 
 // NINE DESKTOPS, ON BANDS TEN WORKSPACES WIDE -- fixed in the library, which
-// says why (init.lua). The overview is the 3 x 3 those nine make.
+// says why (init.lua).
 var DESKTOP_COUNT = 9
 var BAND_WIDTH = 10
 
-// A MONITOR'S DESKTOPS ARE THE BAND IT IS SHOWING.
+// A monitor's rectangle on the desk, in the LOGICAL pixels Hyprland positions
+// windows in: its pixel size over its scale, turned for a rotated panel.
+function logicalRect(monitor) {
+  var scale = monitor.scale > 0 ? monitor.scale : 1
+  var turned = monitor.transform % 2 === 1
+  var width = (turned ? monitor.height : monitor.width) / scale
+  var height = (turned ? monitor.width : monitor.height) / scale
+  return { x: monitor.x, y: monitor.y, width: width, height: height }
+}
+
+// The desk: every monitor's rectangle together.
+function deskBox(state) {
+  var left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+  for (var index = 0; index < state.monitors.length; index++) {
+    var r = logicalRect(state.monitors[index])
+    left = Math.min(left, r.x); top = Math.min(top, r.y)
+    right = Math.max(right, r.x + r.width); bottom = Math.max(bottom, r.y + r.height)
+  }
+  if (left === Infinity) return { x: 0, y: 0, width: 1, height: 1 }
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
+// THE GRID IS ONE, ACROSS THE WHOLE DESK -- not a grid per monitor. Every
+// monitor draws its own part of it, so on two stacked panels the middle row
+// crosses the bezel, as one window across the desk would. Each cell is the
+// desk's own shape: a miniature of the whole desk on that desktop.
 //
-// The band is read off the workspace the monitor is showing, NOT off the
-// workspaces the compositor has put on it: take a laptop off its dock and the
-// external monitors' workspaces pile onto the laptop's panel, and counting
-// those would draw three bands' worth of cells. The grid is always one band:
-// exactly the desktops the number keys reach.
-function desktopsOf(state, monitorName) {
-  var monitor = monitorNamed(state, monitorName)
-  var active = monitor && monitor.activeWorkspace ? monitor.activeWorkspace.id : 1
-  var bandStart = active > 0 ? Math.floor((active - 1) / BAND_WIDTH) * BAND_WIDTH : 0
-  var desktops = []
-  for (var desktop = 1; desktop <= DESKTOP_COUNT; desktop++)
-    desktops.push({ desktop: desktop, workspaceId: bandStart + desktop })
-  return desktops
+// The SAME arithmetic as plugins/orbit's renderer (overviewCell in
+// scene.wgsl), in desk pixels: 3 x 3 inside 92% x 86% of the desk, gaps of
+// 1.2% of its height, centred. If the two disagree, the orbit scene's
+// viewports and these frames slide apart.
+function deskGrid(state) {
+  var box = deskBox(state)
+  var gap = box.height * 0.012
+  var aspect = box.width / box.height
+  var cellWidth = Math.min((box.width * 0.92 - 2 * gap) / 3, (box.height * 0.86 - 2 * gap) / 3 * aspect)
+  var cellHeight = cellWidth / aspect
+  var left = (box.width - (3 * cellWidth + 2 * gap)) / 2
+  var top = (box.height - (3 * cellHeight + 2 * gap)) / 2
+  var cells = []
+  for (var index = 0; index < DESKTOP_COUNT; index++) {
+    cells.push({
+      desktop: index + 1,
+      x: left + (index % 3) * (cellWidth + gap),
+      y: top + Math.floor(index / 3) * (cellHeight + gap),
+      width: cellWidth,
+      height: cellHeight
+    })
+  }
+  return { box: box, cells: cells, scale: cellWidth / box.width }
+}
+
+// The band a monitor is on, read off the workspace it is showing -- not off
+// the workspaces the compositor has put on it, which a laptop off its dock
+// piles onto its one panel.
+function bandStartOf(monitor) {
+  var active = monitor.activeWorkspace ? monitor.activeWorkspace.id : 1
+  return active > 0 ? Math.floor((active - 1) / BAND_WIDTH) * BAND_WIDTH : 0
+}
+
+// Desktop N's windows on EVERY monitor, placed on the desk: the top panel's in
+// the upper part of the cell, the bottom panel's in the lower, where they are.
+function windowsOnDesktop(state, desktop) {
+  var box = deskBox(state)
+  var windows = []
+  for (var index = 0; index < state.monitors.length; index++) {
+    var on = windowsOn(state, bandStartOf(state.monitors[index]) + desktop)
+    for (var w = 0; w < on.length; w++) {
+      windows.push({
+        client: on[w],
+        x: on[w].at[0] - box.x,
+        y: on[w].at[1] - box.y,
+        width: on[w].size[0],
+        height: on[w].size[1]
+      })
+    }
+  }
+  return windows
+}
+
+// The desk's desktop: the focused monitor's.
+function currentDesktop(state) {
+  for (var index = 0; index < state.monitors.length; index++) {
+    var monitor = state.monitors[index]
+    if (!monitor.focused || !monitor.activeWorkspace) continue
+    var desktop = ((monitor.activeWorkspace.id - 1) % BAND_WIDTH) + 1
+    return desktop > DESKTOP_COUNT ? -1 : desktop
+  }
+  return -1
 }
 
 function windowsOn(state, workspaceId) {
@@ -66,29 +140,6 @@ function windowsOn(state, workspaceId) {
 // it without the prefix.
 function toplevelAddress(clientAddress) {
   return String(clientAddress || "").replace(/^0x/, "")
-}
-
-// THE GRID IS 3 x 3, the desk's own shape: columns are bearings around the
-// station, rows are positions along its orbit. Each cell keeps the MONITOR's
-// shape -- `aspect` is the monitor's, passed in, because width and height here
-// are only the area the grid may fill, and a cell cut to the area's shape clips
-// the bottom off every window in it.
-function gridFor(parameters) {
-  var widthPerCell = (parameters.width - 2 * parameters.gap) / 3
-  var heightPerCell = (parameters.height - 2 * parameters.gap) / 3
-  var cellWidth = Math.min(widthPerCell, heightPerCell * parameters.aspect)
-  return { columns: 3, rows: 3, cellWidth: Math.floor(cellWidth), cellHeight: Math.floor(cellWidth / parameters.aspect) }
-}
-
-// WHERE A CELL GOES, WITH A SHORT LAST ROW CENTRED. Ten desktops in a 4 x 3
-// grid leave two in the last row; pushed left, they read as a grid with holes
-// in it rather than as the end of a list. Columns are fractional for exactly
-// that row.
-function cellPlace(parameters) {
-  var row = Math.floor(parameters.index / parameters.columns)
-  var inRow = Math.min(parameters.columns, parameters.count - row * parameters.columns)
-  var column = parameters.index % parameters.columns + (parameters.columns - inRow) / 2
-  return { row: row, column: column }
 }
 
 // Held panels, as the library publishes them: "<monitor> <desktop>" per line.
@@ -122,11 +173,13 @@ if (typeof module !== "undefined") {
   module.exports = {
     parse: parse,
     monitorNamed: monitorNamed,
-    desktopsOf: desktopsOf,
+    logicalRect: logicalRect,
+    deskBox: deskBox,
+    deskGrid: deskGrid,
+    windowsOnDesktop: windowsOnDesktop,
+    currentDesktop: currentDesktop,
     windowsOn: windowsOn,
     toplevelAddress: toplevelAddress,
-    gridFor: gridFor,
-    cellPlace: cellPlace,
     heldPanels: heldPanels,
     desktopForKey: desktopForKey,
     closesOverview: closesOverview

@@ -92,23 +92,21 @@ struct Panel {
     last_history: usize,
 }
 
-/// Where the camera is on the torus, and where it is going.
+/// Where the camera is on the ring, and where it is going.
 ///
-/// Desktop N is (bearing, orbit position) = (column, row) of the 3 x 3. Both
-/// are cyclic, 120 degrees a step, and each is nudged by its own shortest turn
-/// -- so every switch is at most one step on each, and 3 -> 4 and 9 -> 1 are
-/// the same move as any other: one turn right and one step along the orbit.
+/// Desktop N is frame N of one 360-degree view, 40 degrees a frame, each to the
+/// right of the last and 9 round to 1. Every move turns the short way round the
+/// ring, so N -> N+1 is always the same 40-degree turn right -- 3 -> 4 and
+/// 9 -> 1 included -- and no jump turns more than four frames.
 struct Camera {
-    bearing_from: f32,
-    bearing_to: f32,
-    orbit_from: f32,
-    orbit_to: f32,
+    heading_from: f32,
+    heading_to: f32,
     started: Instant,
 }
 
-const STEP: f32 = std::f32::consts::TAU / 3.0;
-/// The bearing of column 1; columns step right from it.
-const FIRST_BEARING: f32 = 0.4;
+const FRAME: f32 = std::f32::consts::TAU / 9.0;
+/// The heading of desktop 1; the ring turns right from it.
+const FIRST_HEADING: f32 = 0.4;
 const ALTITUDE: f32 = 480.0;
 
 fn shortest(from: f32, to: f32) -> f32 {
@@ -116,28 +114,21 @@ fn shortest(from: f32, to: f32) -> f32 {
 }
 
 impl Camera {
-    const SECONDS: f32 = 1.8;
+    const SECONDS: f32 = 1.6;
 
     fn aim(&mut self, desktop: i32, now: Instant) {
-        let (bearing, orbit, _) = self.at(now);
+        let (heading, _) = self.at(now);
         let index = (desktop - 1).rem_euclid(9);
-        let (column, row) = (index % 3, index / 3);
-        self.bearing_from = bearing;
-        self.bearing_to = bearing + shortest(bearing, FIRST_BEARING - column as f32 * STEP);
-        self.orbit_from = orbit;
-        self.orbit_to = orbit + shortest(orbit, row as f32 * STEP);
+        self.heading_from = heading;
+        self.heading_to = heading + shortest(heading, FIRST_HEADING - index as f32 * FRAME);
         self.started = now;
     }
 
-    /// Bearing, orbit position, and how hard the camera is moving (0..1).
-    fn at(&self, now: Instant) -> (f32, f32, f32) {
+    /// Heading, and how hard the camera is moving (0..1).
+    fn at(&self, now: Instant) -> (f32, f32) {
         let p = ((now - self.started).as_secs_f32() / Self::SECONDS).clamp(0.0, 1.0);
         let e = p * p * p * (p * (p * 6.0 - 15.0) + 10.0);
-        (
-            self.bearing_from + (self.bearing_to - self.bearing_from) * e,
-            self.orbit_from + (self.orbit_to - self.orbit_from) * e,
-            (p * std::f32::consts::PI).sin(),
-        )
+        (self.heading_from + (self.heading_to - self.heading_from) * e, (p * std::f32::consts::PI).sin())
     }
 }
 
@@ -181,9 +172,6 @@ fn halton(mut index: u32, base: u32) -> f32 {
 fn normalize(v: [f32; 3]) -> [f32; 3] {
     let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     [v[0] / l, v[1] / l, v[2] / l]
-}
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
 /// A texture from disk, scaled to what the GPU allows, with a full mip chain
@@ -359,7 +347,7 @@ impl App {
         }
         let now = Instant::now();
         let time = (now - self.started).as_secs_f32();
-        let (bearing, orbit, motion) = self.camera.at(now);
+        let (heading, motion) = self.camera.at(now);
         let altitude = ALTITUDE;
 
         // IDLE AT TEN FRAMES A SECOND. Behind a desk of windows the scene only
@@ -385,16 +373,7 @@ impl App {
             self.pipelines.final_pass = Some((format, pipeline));
         }
 
-        // Standing above the planet at this altitude, facing this bearing,
-        // tipped down so the horizon sits in the upper part of the desk.
-        let up_world = [0.0, 1.0, 0.0];
         let eye = [0.0, PLANET_RADIUS + altitude, 0.0];
-        let dip = (PLANET_RADIUS / (PLANET_RADIUS + altitude)).acos();
-        let pitch = dip * 0.62;
-        let forward = normalize([bearing.cos() * pitch.cos(), -pitch.sin(), bearing.sin() * pitch.cos()]);
-        let right = normalize(cross(up_world, forward));
-        let up = cross(forward, right);
-
         let panel = &mut self.panels[index];
         let targets = panel.targets.as_ref().unwrap();
         let (iw, ih) = (((panel.width as f32) * self.scale) as u32, ((panel.height as f32) * self.scale) as u32);
@@ -404,20 +383,21 @@ impl App {
         if fresh { panel.last_render = now; panel.last_history = i; }
         let uniforms = Uniforms {
             eye: [eye[0], eye[1], eye[2], time],
-            forward: [forward[0], forward[1], forward[2], motion],
-            right: [right[0], right[1], right[2], desk_width / desk_height],
-            up: [up[0], up[1], up[2], 1.1],
+            // The camera itself is built in the shader from the heading, the
+            // same way for the live desk and for its overview cell.
+            forward: [0.0, 0.0, 0.0, heading],
+            right: [0.0, 0.0, 0.0, desk_width / desk_height],
+            up: [0.0, 0.0, 0.0, motion],
             pane,
-            // The sun, placed so the three orbit positions are day, a low
-            // golden sun on the terminator, and night: its elevation over the
-            // station goes as cos(orbit - 40 degrees) -- 0.77, 0.17, -0.94.
+            // The station near dawn: the sun 8 degrees up, so turning round the
+            // ring passes sunrise glare, day, the terminator, and the night side.
             sun: {
-                let s = normalize([-0.582, 0.694, 0.423]);
+                let s = normalize([0.98, 0.14, 0.12]);
                 [s[0], s[1], s[2], 1.3 + time * 0.0105]
             },
             jitter: [jitter[0], jitter[1], iw as f32, ih as f32],
             extra: [panel.width as f32, panel.height as f32, (panel.frame % 1024) as f32, blend],
-            view: [orbit, if self.overview { 1.0 } else { 0.0 }, altitude, FIRST_BEARING],
+            view: [0.0, if self.overview { 1.0 } else { 0.0 }, altitude, FIRST_HEADING],
         };
         self.queue.write_buffer(&targets.uniform, 0, bytemuck::bytes_of(&uniforms));
 
@@ -727,7 +707,7 @@ fn main() {
     };
 
     let now = Instant::now();
-    let mut camera = Camera { bearing_from: FIRST_BEARING, bearing_to: FIRST_BEARING, orbit_from: 0.0, orbit_to: 0.0, started: now };
+    let mut camera = Camera { heading_from: FIRST_HEADING, heading_to: FIRST_HEADING, started: now };
     // Where the desk already is: the workspace's place in its band of ten.
     let desktop = std::env::var("HYPRPEACH_DESKTOP").ok().and_then(|v| v.parse().ok()).unwrap_or_else(|| {
         let within = (active_workspace() - 1).rem_euclid(10) + 1;
@@ -765,54 +745,36 @@ fn main() {
 mod tests {
     use super::*;
 
-    /// The move from one desktop to another: (bearing change, orbit change).
-    fn move_between(from: i32, to: i32) -> (f32, f32) {
+    /// The turn from one desktop to another, in frames.
+    fn turn(from: i32, to: i32) -> f32 {
         let long_ago = Instant::now() - std::time::Duration::from_secs(60);
-        let mut camera = Camera { bearing_from: FIRST_BEARING, bearing_to: FIRST_BEARING, orbit_from: 0.0, orbit_to: 0.0, started: long_ago };
+        let mut camera = Camera { heading_from: FIRST_HEADING, heading_to: FIRST_HEADING, started: long_ago };
         camera.aim(from, long_ago);
-        camera.started = long_ago;
-        let (bearing, orbit, _) = camera.at(Instant::now());
+        let (heading, _) = camera.at(Instant::now());
         camera.aim(to, Instant::now());
-        (camera.bearing_to - bearing, camera.orbit_to - orbit)
-    }
-
-    fn close(a: (f32, f32), b: (f32, f32)) -> bool {
-        (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4
+        (camera.heading_to - heading) / FRAME
     }
 
     #[test]
-    fn the_next_desktop_is_one_turn_to_the_right() {
-        assert!(close(move_between(1, 2), (-STEP, 0.0)));
-        assert!(close(move_between(2, 3), (-STEP, 0.0)));
-    }
-
-    #[test]
-    fn a_row_boundary_is_no_wilder_than_any_other_step() {
-        // 3 -> 4 turns right like every step, and moves one step along the orbit.
-        assert!(close(move_between(3, 4), (-STEP, STEP)));
-        assert!(close(move_between(6, 7), (-STEP, STEP)));
-    }
-
-    #[test]
-    fn nine_wraps_forward_to_one() {
-        // The same move as 3 -> 4: the torus closes, nothing flips back.
-        assert!(close(move_between(9, 1), move_between(3, 4)));
-    }
-
-    #[test]
-    fn no_switch_turns_more_than_one_step_on_either_axis() {
+    fn every_next_desktop_is_one_frame_to_the_right() {
         for from in 1..=9 {
-            for to in 1..=9 {
-                let (bearing, orbit) = move_between(from, to);
-                assert!(bearing.abs() <= STEP + 1e-4 && orbit.abs() <= STEP + 1e-4, "{from} -> {to}: {bearing} {orbit}");
-            }
+            let to = from % 9 + 1;
+            assert!((turn(from, to) + 1.0).abs() < 1e-4, "{from} -> {to}: {}", turn(from, to));
         }
     }
 
     #[test]
-    fn going_back_retraces_going_forward() {
-        let forward = move_between(4, 5);
-        let back = move_between(5, 4);
-        assert!(close(back, (-forward.0, -forward.1)));
+    fn nine_to_one_is_no_different_from_one_to_two() {
+        assert!((turn(9, 1) - turn(1, 2)).abs() < 1e-4);
+        assert!((turn(3, 4) - turn(1, 2)).abs() < 1e-4);
+    }
+
+    #[test]
+    fn no_jump_turns_more_than_four_frames() {
+        for from in 1..=9 {
+            for to in 1..=9 {
+                assert!(turn(from, to).abs() <= 4.0 + 1e-4, "{from} -> {to}: {}", turn(from, to));
+            }
+        }
     }
 }
