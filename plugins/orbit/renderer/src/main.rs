@@ -467,6 +467,12 @@ fn main() {
     let file = scene_file();
     let mut renderer = Renderer::new(device, queue, scale, file.clone());
     let scene = first_scene(&mut renderer, &file);
+    // A remembered scene that is gone (or no longer compiles) fell back to
+    // another; record what is really showing, so `hyprpeach scene` says so.
+    // Not for a scene picked from the environment, which is only for now.
+    if file.is_none() && std::env::var("HYPRPEACH_SCENE").is_err() && remembered_scene().as_deref() != Some(scene.as_str()) {
+        remember_scene(&scene);
+    }
 
     let monitors = read_monitors();
     let now = Instant::now();
