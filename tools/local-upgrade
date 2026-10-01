@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Puts this checkout on this machine, the way an update would: `npm run local-upgrade`.
+#
+#   npm run local-upgrade             the installed hyprpeach moves to this checkout's HEAD
+#   npm run local-upgrade -- orbit    ...and adds the plugins named
+#
+# It installs COMMITS, not the working tree -- what gets tested is exactly what
+# would be released -- so uncommitted changes are refused rather than silently
+# left out. The installed clone is checked out at that commit, detached, which
+# also covers a branch whose history was amended since the last run; a later
+# `omarchy plugin update` fast-forwards from it as from anywhere on main.
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+PLUGIN="$HOME/.config/omarchy/plugins/hyprpeach"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+main() {
+  [[ -d $PLUGIN/.git ]] || die "hyprpeach is not installed here.\n  Install it: omarchy plugin add https://github.com/mariotinoco/hyprpeach --enable"
+  [[ -z $(git -C "$ROOT" status --porcelain) ]] || die "$ROOT has uncommitted changes, and only commits are installed.\n  Commit them, then run this again."
+  [[ -z $(git -C "$PLUGIN" status --porcelain) ]] || die "the installed clone at $PLUGIN has local changes; they would be lost."
+
+  local head
+  head=$(git -C "$ROOT" rev-parse HEAD)
+  git -C "$PLUGIN" fetch --quiet "$ROOT" HEAD
+  git -C "$PLUGIN" -c advice.detachedHead=false checkout --quiet --detach "$head"
+  say "installed $(git -C "$PLUGIN" log --oneline -1)"
+
+  local name
+  for name in "$@"; do "$PLUGIN/bin/hyprpeach" plugin add "$name"; done
+
+  # Every added plugin's own build, brought up to date: a plugin that declares
+  # `prepare` (orbit's renderer) rebuilds when its source moved, and returns at
+  # once when it did not.
+  local manifest script id
+  for manifest in "$PLUGIN"/plugins/*/manifest.json; do
+    script=$(jq -r '.hyprpeach.prepare // empty' "$manifest")
+    id=$(jq -r .id "$manifest")
+    [[ -n $script && -L $HOME/.config/omarchy/plugins/$id ]] || continue
+    "$(dirname "$manifest")/$script" --if-stale
+  done
+
+  hyprctl reload >/dev/null
+  local errors
+  errors=$(hyprctl configerrors)
+  if [[ -n $(tr -d '[:space:]' <<<"$errors") ]]; then
+    printf '%s\n' "$errors" >&2
+    # The one this machine is known to hit: a config of its own that calls
+    # setup() with options 3.x refuses, loaded before hyprpeach's block.
+    grep -q "desktop_count" <<<"$errors" && say "something else in your Hyprland config passes desktop_count to hyprpeach; 3.x refuses it."
+    die "Hyprland reported config errors"
+  fi
+  omarchy restart shell >/dev/null 2>&1
+  "$PLUGIN/bin/hyprpeach" plugin list
+}
+
+main "$@"

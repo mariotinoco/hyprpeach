@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Every suite this repository has, in one run: `npm test`.
+#
+# The release script runs this and refuses to publish on a failure, so what is
+# listed here is what a release has been checked against. Each suite prints its
+# own failures; this prints which suites failed.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+failed=()
+run() {
+  local name=$1; shift
+  printf '\n\033[1m%s\033[0m\n' "$name"
+  "$@" || failed+=("$name")
+}
+
+run "library"   lua tests/hyprpeach.test.lua
+run "install"   bash tests/install.test.sh
+run "overview"  bash tests/overview.test.sh
+run "dev-ports" bash tests/dev-ports.test.sh
+# The orbit renderer's path rules, in Rust. The build directory is the one the
+# plugin's own prepare uses, so this is a few seconds after the first time.
+if command -v cargo >/dev/null; then
+  run "orbit" env CARGO_TARGET_DIR="$HOME/.cache/hyprpeach/orbit-target" cargo test --release --quiet --manifest-path plugins/orbit/renderer/Cargo.toml
+else
+  failed+=("orbit (no cargo here to run it)")
+fi
+validate() {
+  local folder
+  for folder in . plugins/*/; do omarchy plugin validate "$folder" || return 1; done
+}
+run "manifests" validate
+
+echo
+if (( ${#failed[@]} == 0 )); then
+  echo "every suite passed"
+else
+  printf 'FAILED: %s\n' "${failed[@]}"
+  exit 1
+fi

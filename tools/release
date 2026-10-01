@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Publishes this commit: `npm run release` (or `npm run release -- --yes`).
+#
+# Everything CLAUDE.md says a release is, done in order and checked, so none of
+# it is a step somebody remembers:
+#
+#   - hyprpeach's tag is v<manifest.json version>; each plugin whose version
+#     has no tag yet gets <name>-v<version>. A plugin already released at its
+#     version is left alone.
+#   - every tag needs its notes, releases/<tag>.md: a first line `# title`,
+#     then the notes. Written before publishing, so they are reviewed in a diff.
+#   - refused unless: the tree is clean, HEAD fast-forwards main, README's
+#     pinned commands name this version, every suite passes, and no tag about
+#     to be made already exists -- a published tag is never moved.
+#   - main is pushed BEFORE the tags. A 1.x `hyprpeach upgrade` installs main
+#     the moment it sees a new tag; a tag that arrives first hands it old code.
+#   - each push is verified on the remote: `git push` of a tag the remote
+#     already has succeeds, silently, and changes nothing.
+#   - hyprpeach's Release is marked Latest; plugin Releases never are.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+remote_commit() {
+  git ls-remote origin "$1" | awk '{print $1}'
+}
+
+notes_title() { head -n 1 "releases/$1.md" | sed 's/^# *//'; }
+notes_body() { tail -n +2 "releases/$1.md" | sed '/./,$!d'; }
+
+main() {
+  local confirmed=no
+  [[ ${1:-} == --yes ]] && confirmed=yes
+
+  [[ -z $(git status --porcelain) ]] || die "uncommitted changes: a release is a commit."
+  git fetch --quiet --tags origin
+  git merge-base --is-ancestor origin/main HEAD || die "HEAD does not descend from origin/main, so main cannot fast-forward to it."
+  local head
+  head=$(git rev-parse HEAD)
+
+  local version tag
+  version=$(jq -r .version manifest.json)
+  tag="v$version"
+  [[ -z $(remote_commit "refs/tags/$tag") ]] || die "$tag is already published. Bump the version in manifest.json."
+  grep -qF -- "--branch $tag " README.md || die "README.md's pinned commands do not name $tag; they move with the version."
+
+  local tags=("$tag") manifest name plugin_tag
+  for manifest in plugins/*/manifest.json; do
+    name=$(basename "$(dirname "$manifest")")
+    plugin_tag="$name-v$(jq -r .version "$manifest")"
+    [[ -n $(remote_commit "refs/tags/$plugin_tag") ]] && continue
+    tags+=("$plugin_tag")
+  done
+  for plugin_tag in "${tags[@]}"; do
+    [[ -s releases/$plugin_tag.md ]] || die "no notes for $plugin_tag: write releases/$plugin_tag.md (first line '# title')."
+    if git rev-parse -q --verify "refs/tags/$plugin_tag" >/dev/null && [[ $(git rev-parse "$plugin_tag^{}") != "$head" ]]; then
+      die "a local tag $plugin_tag points somewhere else. It was never published; delete it: git tag -d $plugin_tag"
+    fi
+  done
+
+  say "running every suite"
+  tools/test >/dev/null 2>&1 || die "a suite failed. Run: npm test"
+
+  say "about to release $(git log --oneline -1)"
+  for plugin_tag in "${tags[@]}"; do printf '    %-22s %s\n' "$plugin_tag" "$(notes_title "$plugin_tag")"; done
+  if [[ $confirmed != yes ]]; then
+    read -r -p "Push main, tag and publish? [y/N] " answer
+    [[ $answer == [yY] ]] || die "nothing published"
+  fi
+
+  git push --quiet origin HEAD:main
+  [[ $(remote_commit refs/heads/main) == "$head" ]] || die "main on origin is not $head after the push"
+  say "main → $(git rev-parse --short HEAD)"
+
+  for plugin_tag in "${tags[@]}"; do
+    git rev-parse -q --verify "refs/tags/$plugin_tag" >/dev/null || git tag -a "$plugin_tag" -m "$plugin_tag" "$head"
+  done
+  git push --quiet origin "${tags[@]}"
+  for plugin_tag in "${tags[@]}"; do
+    [[ $(remote_commit "refs/tags/$plugin_tag^{}") == "$head" ]] || die "$plugin_tag on origin does not point at $head"
+  done
+  say "tagged ${tags[*]}"
+
+  for plugin_tag in "${tags[@]}"; do
+    local latest=--latest=false
+    [[ $plugin_tag == "$tag" ]] && latest=--latest
+    gh release create "$plugin_tag" --verify-tag "$latest" --title "$plugin_tag — $(notes_title "$plugin_tag")" --notes "$(notes_body "$plugin_tag")" >/dev/null
+  done
+  say "published:"
+  gh release list --limit "${#tags[@]}"
+}
+
+main "$@"

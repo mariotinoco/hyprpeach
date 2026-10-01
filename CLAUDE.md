@@ -58,36 +58,21 @@ fetch by name, so a moved tag leaves a clone reporting itself correctly pinned w
 running code that exists nowhere. That has already happened here once, and nothing
 noticed for a whole release.
 
-**A release is not shipped until GitHub says so.** Pushing a tag does not create a
-Release — the Releases page keeps showing the last one somebody published by hand, so
-the project reads as abandoned at whatever version that was while four newer tags sit
-in the repository unmentioned. Finish every release:
+**`npm run release` is the release**, and it is how one is done: it checks the tree,
+the version and README's pins, runs every suite, pushes `main` before the tags,
+verifies each on the remote, and publishes the Releases. Its header lists every rule
+it enforces; a rule is changed there, not by hand. Each tag's notes are
+`releases/<tag>.md` — first line `# title`, then the notes — written and reviewed
+before releasing. The notes are the only part of this project most people will ever
+read: what changed for someone using it, not what changed in the source; no commit
+hashes, no file paths.
 
-```bash
-git push --force-with-lease origin main
-git push origin vX.Y.Z
-git ls-remote origin "refs/tags/vX.Y.Z^{}"   # must equal the commit you tagged
-gh release create vX.Y.Z --title "vX.Y.Z — <the subject line>" --notes "..."
-```
-
-A plugin release is the same, published with `--latest=false`: GitHub marks one
-Release "Latest", and it should be hyprpeach's, which is what people install.
-
-**Check the middle line landed before publishing.** `git push origin vX.Y.Z` is not
-idempotent: a tag the remote already has is silently left alone, exit 0, no output
-worth reading. So a tag pushed before a final amend keeps pointing at the commit
-before it, `main` moves on without it, and a Release published against that tag pins
-code nobody reviewed while looking entirely correct. That is what happened to v1.2.0
-— pushed, wrong, unnoticed until the tag was compared with `main` by hand. A tag that
-has already gone out and is wrong is not repointed; it is deleted and the next version
-carries the fix.
-
-The notes are the only part of this project most people will ever read. Say what
-changed for someone using it, not what changed in the source; no commit hashes, no
-file paths. `gh release list` against `git ls-remote --tags origin` is the check that
-they agree.
+Before a release, `npm run local-upgrade` puts the committed HEAD on this machine the
+way an update would, and the change is checked there first.
 
 ## Tests
+
+`npm test` runs every suite below; a release refuses to publish without it passing.
 
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.
 `bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.

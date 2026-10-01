@@ -1,0 +1,10 @@
+{
+  "name": "hyprpeach",
+  "private": true,
+  "description": "Developer commands for this repository. hyprpeach itself is installed with Omarchy, not npm.",
+  "scripts": {
+    "test": "tools/test",
+    "local-upgrade": "tools/local-upgrade",
+    "release": "tools/release"
+  }
+}
