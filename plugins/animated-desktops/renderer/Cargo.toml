@@ -14,3 +14,6 @@ smithay-client-toolkit = "0.21.1"
 wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
 wgpu = "30.0.1"
+
+[dev-dependencies]
+naga = { version = "=30.0.1", features = ["wgsl-in"] }

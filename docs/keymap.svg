@@ -56,7 +56,7 @@
   <text x="28" y="120" class="h2" font-size="14" font-weight="700">SUPER</text>
   <text x="28" y="143" class="peach" font-size="15" font-weight="700">moves your view</text>
   <text x="28" y="165" class="muted" font-size="12">windows stay where they are</text>
-  <rect x="28" y="180" width="104" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="80" y="198" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + 1…0</text>
+  <rect x="28" y="180" width="104" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="80" y="198" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + 1…9</text>
   <rect x="152" y="180" width="104" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="204" y="198" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + ← →</text>
     <rect x="360" y="108" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
     <text x="394.0" y="134" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">1</text>
@@ -84,7 +84,7 @@
   <text x="28" y="325" class="h2" font-size="14" font-weight="700">SUPER + SHIFT</text>
   <text x="28" y="348" class="peach" font-size="15" font-weight="700">moves the window</text>
   <text x="28" y="370" class="muted" font-size="12">your view lands with it</text>
-  <rect x="28" y="385" width="172" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="114" y="403" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + shift + 1…0</text>
+  <rect x="28" y="385" width="172" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="114" y="403" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + shift + 1…9</text>
   <rect x="212" y="385" width="37" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="231" y="403" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">← →</text>
     <rect x="360" y="313" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
     <text x="394.0" y="339" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">1</text>

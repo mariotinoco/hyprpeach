@@ -47,9 +47,6 @@ main() {
   errors=$(hyprctl configerrors)
   if [[ -n $(tr -d '[:space:]' <<<"$errors") ]]; then
     printf '%s\n' "$errors" >&2
-    # The one this machine is known to hit: a config of its own that calls
-    # setup() with options 3.x refuses, loaded before hyprpeach's block.
-    grep -q "desktop_count" <<<"$errors" && say "something else in your Hyprland config passes desktop_count to hyprpeach; 3.x refuses it."
     die "Hyprland reported config errors"
   fi
   omarchy restart shell >/dev/null 2>&1

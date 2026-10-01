@@ -378,3 +378,27 @@ impl Targets {
     pub fn width(&self) -> u32 { self.width }
     pub fn height(&self) -> u32 { self.height }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parsed and validated as wgpu would at runtime, without a GPU: a scene
+    /// that does not compile would otherwise ship with every suite green and
+    /// show up as the renderer quietly falling back to another.
+    fn validate(name: &str, source: &str) {
+        let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|error| panic!("{name}: {}", error.emit_to_string(source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+    }
+
+    #[test]
+    fn every_scene_and_the_post_passes_compile() {
+        let common = include_str!("common.wgsl");
+        for (name, source) in SCENES {
+            validate(name, &format!("{common}\n{source}"));
+        }
+        validate("post", include_str!("post.wgsl"));
+    }
+}

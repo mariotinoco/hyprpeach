@@ -37,9 +37,9 @@ Item {
   }
 
   function close() {
-    if (root.opened) root.announce("closed")
     root.opened = false
   }
+  onOpenedChanged: root.announce()
 
   function focusDesktop(desktop) {
     if (desktop < 1) return
@@ -75,7 +75,6 @@ Item {
       onStreamFinished: {
         root.state = Model.parse(text)
         root.opened = root.state.error === ""
-        if (root.opened) root.announce("open")
       }
     }
   }
@@ -87,8 +86,20 @@ Item {
   // when to rise above the windows to do it. SUPER + TAB only says "toggle";
   // this overview is what knows which way it went, and closes on keys and
   // clicks the library never sees.
-  Process { id: announcer }
-  function announce(state) {
+  //
+  // ALWAYS THE STATE AS IT IS NOW, never a queue of what it was. One process
+  // announces at a time; a change while it runs is caught when it finishes
+  // and announced then. A dropped "closed" would leave the scene above every
+  // window, and two processes racing could land "open" after "closed".
+  property string announced: "closed"
+  Process {
+    id: announcer
+    onExited: root.announce()
+  }
+  function announce() {
+    var state = root.opened ? "open" : "closed"
+    if (announcer.running || state === root.announced) return
+    root.announced = state
     announcer.command = ["hyprctl", "eval", "hl.dispatch(hl.dsp.event(\"hyprpeach-overview," + state + "\"))"]
     announcer.running = true
   }

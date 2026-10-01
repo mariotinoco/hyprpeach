@@ -369,6 +369,8 @@ check "  ...and the file is left as it was" "$(jq -r .speed "$SETTINGS")" "snapp
 hyprpeach scene nebula >/dev/null 2>&1
 check "a scene is written beside the speed, not over it" "$(jq -r '.scene + " " + .speed' "$SETTINGS")" "nebula snappy"
 check "the scene list marks the one in effect" "$(hyprpeach scene | grep -c 'nebula  (in effect)')" "1"
+jq '.scene = "planet"' "$SETTINGS" > "$SETTINGS.edited" && mv "$SETTINGS.edited" "$SETTINGS"
+check "a scene that no longer exists shows the default in effect, as the renderer uses" "$(hyprpeach scene | grep -c 'synthwave  (in effect)')" "1"
 
 hyprpeach plugin remove animated-desktops >/dev/null 2>&1
 check "animated-desktops comes off" "$([[ -L $(plugins_directory)/hyprpeach.animated-desktops ]] && echo linked || echo none)" "none"

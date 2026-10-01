@@ -368,10 +368,6 @@ BarWidget {
           anchors.fill: parent
           bar: root.bar
 
-          // Desktop 10 is drawn as "0" because that is the key you press for
-          // it -- the number row runs 1 to 0, not 1 to 10. It also keeps every
-          // numeral one character wide, so it sits in a circle instead of
-          // straining against one.
           // The held tile carries the lock instead of its numeral.
           text: lockMark.visible ? "" : String(cell.modelData)
           // The invert: on the near-solid tile the numeral drops to the bar's

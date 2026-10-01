@@ -177,12 +177,12 @@ $ hyprpeach plugin remove desktops
 |---|---|
 | [**desktops**](#how-it-works) — Multi-Monitor Desktops | A desktop that spans every monitor and turns as one: the library, [the bar strip](#the-bar-strip), and the overlay. Two monitors, three, one [held](#holding-a-panel) while the rest move. |
 | [**animated-desktops**](plugins/animated-desktops/README.md) — Animated Desktops | A living scene behind your desktops — synthwave or a nebula — with a different place for each desktop, one picture across your monitors, and every switch a flight to the next. Needs desktops. |
-| [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + TAB` shows every desktop at once, on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
+| [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + 0` or `SUPER + TAB` shows every desktop at once, a 3 × 3 on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
 | [**dev-ports**](plugins/dev-ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
 
 **They update with hyprpeach.** `add` links the plugin's folder inside hyprpeach's clone into Omarchy's plugins folder, rather than copying it out, so the one `omarchy plugin update` that moves hyprpeach moves every plugin you added from it. There is nothing else to keep current, and nothing that can fall behind.
 
-Each has its own version and its own release notes — `dev-ports-v0.1.0` beside hyprpeach's `v2.0.0` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
+Each has its own version and its own release notes — `dev-ports-v0.1.0` beside hyprpeach's `v3.0.0` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
 
 It is done this way because Omarchy installs one plugin per repository and reads one bar widget per plugin: separate widgets need separate plugin folders, and a repository per widget would split one project across several.
 
@@ -351,7 +351,7 @@ Stock Omarchy bindings, given up on purpose: on a two-panel desk the desktop str
 `SUPER + SHIFT + TAB`, `SUPER + CTRL + TAB`, `SUPER + scroll` and `SUPER + SHIFT + ALT + 1…9` are bound to nothing — the table above already covers the day. Name a chord for any of them in [`keys`](#install) to bring it back.
 
 > [!IMPORTANT]
-> Their **stock** bindings are cleared regardless, and so is the whole ten-key number row even when you have fewer desktops. A chord hyprpeach declines to bind is not a chord that falls silent — it is the stock one, still live, still moving a single panel.
+> Their **stock** bindings are cleared regardless, and so is the whole ten-key number row, `0` included. A chord hyprpeach declines to bind is not a chord that falls silent — it is the stock one, still live, still moving a single panel.
 
 <br>
 

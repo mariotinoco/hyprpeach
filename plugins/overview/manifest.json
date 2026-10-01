@@ -4,7 +4,7 @@
   "name": "Desktop Overview",
   "version": "0.2.0",
   "author": "hyprpeach",
-  "description": "An exposé of every desktop on every monitor at once, with live window previews. SUPER + TAB opens it on all your screens together, and choosing a desktop turns the whole multi-monitor desk.",
+  "description": "An exposé of every desktop on every monitor at once, with live window previews. SUPER + 0 or SUPER + TAB opens it as a 3 x 3 on all your screens together, and choosing a desktop turns the whole multi-monitor desk.",
   "kinds": [
     "panel"
   ],

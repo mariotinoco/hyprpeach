@@ -803,8 +803,17 @@ function peach.setup(options)
     return DEFAULTS[key]
   end
 
+  -- DESKTOP_COUNT IS GONE, AND SAID SO -- NOT REFUSED. 2.x's README had
+  -- `desktop_count = 10` in its copy-paste setup() call, so configs written
+  -- by hand carry it. A refusal is a Lua error, and an error here aborts the
+  -- rest of hyprland.lua with it: no hyprpeach keys, and nothing the config
+  -- does after this call either. So it is ignored, and a notification -- shown
+  -- even with notify off, because it asks for an edit -- says to remove it.
   if options.desktop_count ~= nil then
-    refuse({ reason = "desktop_count is gone: hyprpeach has nine desktops, a 3 x 3, and SUPER + 0 opens the overview. Remove desktop_count from setup()." })
+    hl.notification.create({
+      text = "🍑 desktop_count is gone: hyprpeach has nine desktops, a 3 x 3, and SUPER + 0 opens the overview. Remove desktop_count from setup().",
+      time = 15000,
+    })
   end
 
   state.focus_follows_fling = chosen("focus_follows_fling")

@@ -23,22 +23,40 @@ Item {
     running: true
     command: [root.pluginDirectory + "/prepare", "--if-stale"]
     stderr: StdioCollector { id: prepareErrors; waitForEnd: true }
+    // Started either way: a rebuild that fails -- no Rust any more, a broken
+    // toolchain -- leaves the last good build in place, and an old scene
+    // behind the desk beats none. With no build at all, the renderer fails to
+    // start and the backoff below gives up on it.
     onExited: function(exitCode) {
-      if (exitCode === 0) renderer.running = true
-      else console.warn("hyprpeach animated-desktops: prepare failed:", prepareErrors.text)
+      if (exitCode !== 0) console.warn("hyprpeach animated-desktops: prepare failed; starting the last build:", prepareErrors.text)
+      renderer.running = true
     }
   }
 
   Process {
     id: renderer
     command: [root.dataDirectory + "/hyprpeach-animated-desktops"]
-    onRunningChanged: marker.setText(renderer.running ? "running\n" : "")
+    onRunningChanged: {
+      marker.setText(renderer.running ? "running\n" : "")
+      if (renderer.running) steady.restart()
+      else steady.stop()
+    }
     // A renderer that falls over is started again, backing off, and given up
-    // on after five tries rather than spinning a GPU driver bug into a loop.
+    // on after five tries in a row rather than spinning a GPU driver bug into
+    // a loop.
     onExited: {
       root.failures++
       if (root.failures < 5) restart.start()
+      else console.warn("hyprpeach animated-desktops: the renderer keeps stopping; giving up until the shell restarts")
     }
+  }
+
+  // IN A ROW: a minute running clears the count, so a monitor unplugged now
+  // and then over days of uptime is never the fifth strike.
+  Timer {
+    id: steady
+    interval: 60000
+    onTriggered: root.failures = 0
   }
 
   Timer {

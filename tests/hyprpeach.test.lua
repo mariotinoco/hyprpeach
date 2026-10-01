@@ -134,13 +134,17 @@ end
 -- --------------------------------------------------------------------------
 print("\nnine desktops, a 3 x 3, and not a setting")
 do
-  stub_hyprland({})
+  -- 2.x's README put `desktop_count = 10` in the setup() call people copied.
+  -- An error there would abort the rest of their hyprland.lua with it.
+  local legacy = stub_hyprland({})
   package.loaded.hyprpeach = nil
-  local ok, message = pcall(function()
+  local ok = pcall(function()
     dofile("init.lua").setup({ monitors_bottom_to_top = { BOTTOM, TOP }, desktop_count = 10, notify = false })
   end)
-  check({ label = "desktop_count is refused rather than ignored", got = ok, want = false })
-  check({ label = "  ...and the refusal says what replaced it", got = message:find("SUPER + 0", 1, true) ~= nil, want = true })
+  check({ label = "a 2.x setup() with desktop_count still loads", got = ok, want = true })
+  check({ label = "  ...and binds nine desktops", got = legacy.bound["SUPER + code:18"], want = "Focus desktop 9" })
+  check({ label = "  ...not ten: 0 is the overview", got = legacy.bound["SUPER + code:19"], want = "Every desktop at once" })
+  check({ label = "  ...and says, even with notify off, to remove it", got = (legacy.notifications[1] or ""):find("Remove desktop_count", 1, true) ~= nil, want = true })
 
   local _, recorder = fresh_peach({})
   check({ label = "SUPER + 0 opens the overview", got = recorder.bound["SUPER + code:19"], want = "Every desktop at once" })

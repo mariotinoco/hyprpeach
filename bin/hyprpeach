@@ -111,12 +111,16 @@ required_plugin_names() {
 # A plugin's own setup step, declared as `hyprpeach.prepare` in its manifest:
 # a script beside it that builds or fetches what the plugin needs before it can
 # run. Declared rather than known here by name, like `requires`.
+#
+# Returns the script's status; the caller says what a failure means, because
+# it means different things on `add` (nothing was added) and on `upgrade` (the
+# plugin is still there, on its last build).
 prepare_plugin() {
   local name=$1
   local script
   script=$(jq -r '.hyprpeach.prepare // empty' "$ROOT/plugins/$name/manifest.json")
   [[ -n $script ]] || return 0
-  "$ROOT/plugins/$name/$script" || die "$name could not be prepared, so it was not added"
+  "$ROOT/plugins/$name/$script"
 }
 
 plugin_is_added() {
@@ -196,7 +200,10 @@ command_plugin_add() {
 
   # Before linking, so a plugin whose build or download fails is never on the
   # bar half-working. Also on an add of one already added: that re-checks it.
-  prepare_plugin "$name"
+  if ! prepare_plugin "$name"; then
+    [[ $state == added ]] && die "$name could not be rebuilt; it is still added, on its last build"
+    die "$name could not be prepared, so it was not added"
+  fi
 
   if [[ $state != added ]]; then
     omarchy plugin validate "$source" >/dev/null || die \
@@ -347,7 +354,7 @@ add_desktops_to_hyprland() {
   # Then left to right, for monitors side by side at one height, which would
   # otherwise come out in whatever order Hyprland lists them. On a laptop
   # docked between two screens and centred on them, the laptop sorts first --
-  # it sits lower -- and so keeps desktops 1-10, which is right: it is the
+  # it sits lower -- and so keeps desktops 1-9, which is right: it is the
   # screen still there when the dock is not.
   local monitors
   monitors=$(hyprctl monitors -j | jq -r 'sort_by(-.y, .x) | .[] | "    \"desc:\(.description)\","')
@@ -372,7 +379,7 @@ add_desktops_to_hyprland() {
   # The menu stays one keypress away on SUPER. Removing desktops puts both back.
   omarchy plugin disable omarchy.workspaces >/dev/null 2>&1 || true
   omarchy plugin disable omarchy.menu >/dev/null 2>&1 || true
-  # A VERTICAL BAR, because the strip is a column of ten cells and a desk this
+  # A VERTICAL BAR, because the strip is a column of nine cells and a desk this
   # model is for is wide. This is the one setting here that is a preference
   # rather than a consequence, and it goes through Omarchy's own command rather
   # than an edit to shell.json, so `omarchy bar position top` puts it back and
@@ -412,11 +419,20 @@ command_upgrade() {
   require_installed_clone
   require_command omarchy "hyprpeach is an Omarchy plugin"
   omarchy plugin update "$PLUGIN_ID"
+  # Reported, not fatal: the update has already happened, and the rebuilds and
+  # the list below are still worth having. Errors here are usually the
+  # person's own config meeting a new release, and they need to see them.
   hyprctl reload >/dev/null
-  # An update can move a plugin's source on; its build has to follow.
+  local errors
+  errors=$(hyprctl configerrors)
+  [[ -z $(tr -d '[:space:]' <<<"$errors") ]] || printf '\033[38;5;203m✗\033[0m Hyprland reported config errors after the update:\n%s\n' "$errors" >&2
+  # An update can move a plugin's source on; its build has to follow. One that
+  # fails to rebuild keeps running its last build.
   local name
   while IFS= read -r name; do
-    plugin_is_added "$name" && prepare_plugin "$name"
+    if plugin_is_added "$name" && ! prepare_plugin "$name"; then
+      printf '\033[38;5;203m✗\033[0m %s could not be rebuilt; it keeps running its last build\n' "$name" >&2
+    fi
   done < <(available_plugin_names)
   command_plugin_list
 }
@@ -433,8 +449,11 @@ command_setting() {
   local schema="$ROOT/plugins/animated-desktops/settings.schema.json"
   local file="${XDG_CONFIG_HOME:-$HOME/.config}/hyprpeach/animated-desktops.json"
   local current choice
+  # What the renderer is using: the file's value when the schema allows it,
+  # otherwise the default -- the renderer falls back the same way.
   current=$(jq -r --arg key "$key" '.[$key] // empty' "$file" 2>/dev/null || true)
-  [[ -n $current ]] || current=$(jq -r --arg key "$key" '.properties[$key].default' "$schema")
+  jq -e --arg key "$key" --arg value "$current" '.properties[$key].enum | index($value)' "$schema" >/dev/null 2>&1 \
+    || current=$(jq -r --arg key "$key" '.properties[$key].default' "$schema")
   if [[ -z $value ]]; then
     while IFS= read -r choice; do
       if [[ $choice == "$current" ]]; then say "$choice  (in effect)"; else printf '   %s\n' "$choice"; fi

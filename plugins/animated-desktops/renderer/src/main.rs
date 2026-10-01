@@ -88,11 +88,16 @@ enum Announcement {
     Monitors,
 }
 
+/// One monitor's surface. FIELD ORDER IS TEARDOWN ORDER: Rust drops fields
+/// top to bottom, and the wgpu surface must go before the Wayland surface it
+/// draws into (create_surface_unsafe's contract) -- the other way round, a
+/// monitor unplugged is a renderer crashed.
 struct Panel {
-    output: wl_output::WlOutput,
-    layer: LayerSurface,
     surface: wgpu::Surface<'static>,
-    format: Option<wgpu::TextureFormat>,
+    layer: LayerSurface,
+    output: wl_output::WlOutput,
+    /// As last configured, to configure again when the surface goes stale.
+    configuration: Option<wgpu::SurfaceConfiguration>,
     targets: Option<Targets>,
 }
 
@@ -178,9 +183,18 @@ impl App {
         }
         let (position, motion) = self.camera.at(now);
         let name = self.output_state.info(&self.panels[index].output).and_then(|info| info.name).unwrap_or_default();
-        let Some((panes, stage)) = layout::placements(&self.monitors) else { return };
-        // A monitor Hyprland has not reported yet is drawn as the stage until it is.
-        let pane = panes.iter().find(|(monitor, _)| *monitor == name).map(|(_, pane)| *pane).unwrap_or(stage);
+        // NEVER RETURN WITHOUT PRESENTING. Hyprland sends the next frame
+        // callback only after a frame is presented, so a render that gives up
+        // early stops that monitor for good. With no monitors from hyprctl --
+        // mid-reload, mid-hotplug -- or a monitor it has not reported yet,
+        // this one is drawn as its own stage until it has.
+        let own_stage = {
+            let aspect = self.panels[index].targets.as_ref().map(|targets| targets.width() as f32 / targets.height().max(1) as f32).unwrap_or(16.0 / 9.0);
+            [-aspect * 0.5, 0.5, aspect, 1.0]
+        };
+        let (panes, stage) = layout::placements(&self.monitors).unwrap_or_else(|| (Vec::new(), own_stage));
+        let pane = panes.iter().find(|(monitor, _)| *monitor == name).map(|(_, pane)| *pane).unwrap_or(own_stage);
+        let stage = if panes.iter().any(|(monitor, _)| *monitor == name) { stage } else { own_stage };
         let frame = Frame {
             time: environment_number("HYPRPEACH_TIME").unwrap_or((now - self.started).as_secs_f32()),
             position: environment_number("HYPRPEACH_POSITION").unwrap_or(position),
@@ -196,10 +210,21 @@ impl App {
         // slideshow, which is all anyone saw. A scene is held to costing little
         // enough to draw at the panel's rate.
         let panel = &mut self.panels[index];
-        let (Some(format), Some(targets)) = (panel.format, panel.targets.as_mut()) else { return };
+        // Render is only called once a configure has set both.
+        let (Some(configuration), Some(targets)) = (panel.configuration.as_ref(), panel.targets.as_mut()) else { return };
+        let format = configuration.format;
+        // A surface gone stale (Outdated, Lost, a Timeout) is configured again
+        // and asked once more, rather than left without a next frame.
         let surface_texture = match panel.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
-            other => { eprintln!("surface: {other:?}"); return; }
+            other => {
+                eprintln!("surface: {other:?}; configuring it again");
+                panel.surface.configure(&self.renderer.device, configuration);
+                match panel.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(texture) | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
+                    other => { eprintln!("surface: {other:?}; this monitor has stopped"); return; }
+                }
+            }
         };
         let view = surface_texture.texture.create_view(&Default::default());
         let mut encoder = self.renderer.device.create_command_encoder(&Default::default());
@@ -250,7 +275,7 @@ impl OutputHandler for App {
                 .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle: Some(display), raw_window_handle: window })
                 .expect("wgpu surface")
         };
-        self.panels.push(Panel { output, layer, surface, format: None, targets: None });
+        self.panels.push(Panel { surface, layer, output, configuration: None, targets: None });
         self.monitors = read_monitors();
     }
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
@@ -275,7 +300,7 @@ impl LayerShellHandler for App {
             let capabilities = self.panels[index].surface.get_capabilities(&self.adapter);
             let format = capabilities.formats.iter().copied().find(|format| format.is_srgb()).unwrap_or(capabilities.formats[0]);
             let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Mailbox) { wgpu::PresentMode::Mailbox } else { wgpu::PresentMode::Fifo };
-            self.panels[index].surface.configure(&self.renderer.device, &wgpu::SurfaceConfiguration {
+            let configuration = wgpu::SurfaceConfiguration {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 format,
                 view_formats: vec![format],
@@ -285,10 +310,11 @@ impl LayerShellHandler for App {
                 desired_maximum_frame_latency: 2,
                 present_mode,
                 color_space: wgpu::SurfaceColorSpace::Auto,
-            });
+            };
+            self.panels[index].surface.configure(&self.renderer.device, &configuration);
             let targets = self.renderer.build_targets(width, height);
             let panel = &mut self.panels[index];
-            panel.format = Some(format);
+            panel.configuration = Some(configuration);
             panel.targets = Some(targets);
             eprintln!("panel {index}: {width}x{height}, {format:?}, {present_mode:?}");
         }
