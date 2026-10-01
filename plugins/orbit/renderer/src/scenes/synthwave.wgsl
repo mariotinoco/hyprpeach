@@ -11,8 +11,11 @@
 
 const STEP_CELLS: f32 = 30.0;       // grid cells travelled per desktop; whole, so 9 stops close without a seam
 const EYE_HEIGHT: f32 = 3.0;        // in grid cells; sets how many cells span the screen's foot (about ten)
-const HORIZON: f32 = 0.06;          // desk heights above centre: on two stacked panels the bezel falls in the floor, not across the sun
-const FOCAL: f32 = 1.0;             // desk heights; about 85 degrees across a 16:9 desk
+// The picture is measured in STAGE HEIGHTS from the home monitor's centre
+// (scene() says why), so every constant below means the same on every desk.
+const HORIZON: f32 = 0.06;          // stage heights above its centre: the floor fills the lower half, the sun and landmark sit in the upper
+const FOCAL: f32 = 1.0;             // stage heights; about 85 degrees across a 16:9 stage
+const STAGE_TOP: f32 = 0.38;        // sky-plane height a landmark stays under: the stage's top (0.44) less the bar and a breath of sky
 const TRAIL_PERIOD: f32 = 90.0;     // cells between repeats of a light trail; divides 9 * STEP_CELLS so the wrap is seamless
 
 struct Palette {
@@ -49,7 +52,7 @@ fn stopPalette(stop: i32) -> Palette {
         }
         case 3: { // ring: violet, the sun framed by a gate
             return makePalette(vec3(0.010, 0.004, 0.040), vec3(0.16, 0.04, 0.34), vec3(0.80, 0.22, 0.75),
-                vec3(1.5, 0.95, 1.10), vec3(1.2, 0.20, 0.65), vec3(1.30, 0.20, 1.20), vec3(0.30, 1.10, 1.60), vec3(0.0, 0.26, 0.14));
+                vec3(1.5, 0.95, 1.10), vec3(1.2, 0.20, 0.65), vec3(1.30, 0.20, 1.20), vec3(0.30, 1.10, 1.60), vec3(0.0, 0.15, 0.10));
         }
         case 4: { // planet: deep night, the sun long set
             return makePalette(vec3(0.002, 0.008, 0.020), vec3(0.02, 0.08, 0.16), vec3(0.08, 0.35, 0.45),
@@ -197,8 +200,21 @@ fn pyramid(base: vec3<f32>, q: vec2<f32>, centre: f32, halfWidth: f32, height: f
     return colour;
 }
 
-fn city(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32) -> vec3<f32> {
-    if (q.y > 0.36) { return base; }
+fn city(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32, time: f32) -> vec3<f32> {
+    // Searchlights from downtown, sweeping slowly: they rise past the stage
+    // into whatever sky a desk has above it, where the city has nothing else.
+    var lights = vec3<f32>(0.0);
+    for (var index = 0; index < 2; index++) {
+        let foot = vec2<f32>(select(-0.42, -0.20, index == 1), 0.12);
+        let angle = 0.32 * sin(time * (0.11 + 0.04 * f32(index)) + f32(index) * 2.4);
+        let direction = vec2<f32>(sin(angle), cos(angle));
+        let relative = q - foot;
+        let along = dot(relative, direction);
+        let aside = abs(relative.x * direction.y - relative.y * direction.x);
+        let beam = exp(-aside / (0.004 + 0.02 * max(along, 0.0))) * step(0.0, along) * exp(-along * 0.9);
+        lights += vec3<f32>(0.35, 0.55, 0.90) * beam * 0.10;
+    }
+    if (q.y > 0.36) { return base + lights; }
     let width = 0.032;
     let column = floor(q.x / width);
     let seed = hash3(vec3<f32>(column, 2.0, 5.0));
@@ -225,14 +241,16 @@ fn city(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32) -> vec3<f32>
     colour = mix(colour, facade, inside);
     // Red aircraft lights on the tallest.
     colour += vec3<f32>(1.6, 0.1, 0.1) * step(0.13, top) * inColumn * exp(-pow((q.y - top - 0.004) / 0.0025, 2.0)) * exp(-pow((local - 0.5) / 0.15, 2.0));
-    return colour;
+    return colour + lights * (1.0 - inside);
 }
 
 fn ring(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32, time: f32) -> vec3<f32> {
-    let centre = vec2<f32>(0.0, 0.25);
+    // Its crown under STAGE_TOP: a gate cut by the stage's edge reads as an
+    // arc, not a ring, and the overview's cells show only the stage.
+    let centre = vec2<f32>(0.0, 0.15);
     let offset = q - centre;
     let distance = length(offset);
-    let outer = 0.36; let inner = 0.32;
+    let outer = 0.225; let inner = 0.195;
     let body = (1.0 - smoothstep(outer - soft, outer + soft, distance)) * smoothstep(inner - soft, inner + soft, distance);
     // Lit from within: the inner rim is hot, the outer a cold edge.
     let angle = atan2(offset.y, offset.x);
@@ -281,7 +299,9 @@ fn spires(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32, time: f32)
     for (var index = 0; index < 4; index++) {
         let seed = f32(index);
         let centre = select(select(select(-0.62, 0.66, index == 3), -0.12, index == 2), 0.30, index == 1);
-        let height = select(select(select(0.30, 0.22, index == 3), 0.42, index == 2), 0.85, index == 1);
+        // The tallest stops just under STAGE_TOP so its beacon shows on any
+        // stage; what was its height above that is its searchlight now.
+        let height = select(select(select(0.24, 0.18, index == 3), 0.31, index == 2), STAGE_TOP - 0.01, index == 1);
         let footWidth = select(0.035, 0.06, index == 1);
         // Tapered, with setbacks: the width narrows in steps up the tower.
         let rise = clamp(q.y / height, 0.0, 1.0);
@@ -297,6 +317,11 @@ fn spires(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32, time: f32)
         let beacon = exp(-dot(q - vec2<f32>(centre, height + 0.006), q - vec2<f32>(centre, height + 0.006)) / 0.00002);
         colour += vec3<f32>(2.0, 0.25, 0.15) * beacon * (0.4 + 0.6 * pow(0.5 + 0.5 * sin(time * 1.7 + seed * 2.1), 3.0));
     }
+    // A beam straight up from the tallest, the line that carries the eye from
+    // the stage into the panel above it, pulsing slowly as if transmitting.
+    let beamFoot = STAGE_TOP;
+    let beam = exp(-abs(q.x - 0.30) / (0.0018 + soft)) * smoothstep(beamFoot - 0.004, beamFoot + 0.01, q.y) * exp(-(q.y - beamFoot) * 0.9);
+    colour += palette.accent * beam * (0.55 + 0.25 * sin(time * 0.8 - q.y * 6.0));
     return colour;
 }
 
@@ -360,7 +385,10 @@ fn eclipse(base: vec3<f32>, q: vec2<f32>, palette: Palette, soft: f32, time: f32
     // Streamers: the corona combed outward, slowly turning.
     let streamers = 0.35 + 0.65 * noise1(angle * 6.0 / PI + time * 0.02, 31.0) * noise1(angle * 17.0 / PI - time * 0.03, 32.0) * 1.6;
     let outside = max(distance - radius, 0.0);
-    var colour = base + palette.accent * (exp(-outside * 40.0) * 0.6 + exp(-outside * 9.0) * 0.25 * streamers) * step(radius, distance);
+    // The long streamers fade over a whole stage height: on a desk with a
+    // panel above, the corona climbs into it instead of stopping at the bezel.
+    var colour = base + palette.accent * (exp(-outside * 40.0) * 0.6 + exp(-outside * 9.0) * 0.25 * streamers
+                                          + exp(-outside * 2.2) * 0.05 * streamers * streamers) * step(radius, distance);
     colour += vec3<f32>(1.8, 1.4, 1.6) * stroke(distance - radius, 0.0009, soft);
     // A diamond-ring bead where the last of the sun shows past the moon.
     let bead = q - (palette.sun.xy + radius * vec2<f32>(cos(0.8), sin(0.8)));
@@ -379,7 +407,7 @@ fn horizonLayer(stop: i32, base: vec3<f32>, q: vec2<f32>, palette: Palette, soft
         }
         case 2: {
             let colour = mountains(base, q, 0.07, 3.0, palette.sky * 0.4, mix(base, palette.sky * 0.3, 0.6), soft);
-            return city(colour, q, palette, soft);
+            return city(colour, q, palette, soft, time);
         }
         case 3: {
             let colour = ring(base, q, palette, soft, time);
@@ -441,6 +469,110 @@ fn gridLines(coordinate: f32, footprint: f32, halfWidth: f32, smear: f32) -> f32
     return mix(resolved, 2.0 * halfWidth + 0.02, smoothstep(0.25, 0.6, footprint));
 }
 
+// THE HIGH SKY: what a monitor above the stage sees -- the upper panel of a
+// stacked pair, the tops of two tall screens beside a laptop. It is quieter
+// than the stage on purpose (the eye belongs below it) but not empty: night
+// deepening with height, a milky way across it, a meteor now and then, and
+// for some stops the upper reaches of their landmark. All of it fades in
+// between 0.3 and 0.6, so the stage's own sky -- and the overview's cells --
+// stay as composed. Only the sky branch calls it; the floor's reflection never
+// looks this high.
+fn highLandmark(stop: i32, base: vec3<f32>, q: vec2<f32>, palette: Palette, time: f32) -> vec3<f32> {
+    switch stop {
+        case 3: {
+            // The gate's builders: an orbital ring arching over the whole sky,
+            // too high to cross the stage, with one light running round it.
+            let centre = vec2<f32>(0.0, -0.25);
+            let radii = vec2<f32>(2.7, 1.40);
+            let offset = (q - centre) / radii;
+            let distance = (length(offset) - 1.0) * radii.y;
+            let angle = atan2(offset.y, offset.x);
+            let segment = 0.6 + 0.4 * stroke(fract(angle * 60.0 / PI + 0.5) - 0.5, 0.35, 0.1);
+            var colour = base + palette.accent * (0.45 * exp(-abs(distance) / 0.0018) * segment + 0.035 * exp(-abs(distance + 0.025) / 0.03));
+            let chase = pow(0.5 + 0.5 * cos(angle - 1.2 - 0.25 * sin(time * 0.05)), 400.0);
+            return colour + palette.accent * 2.0 * chase * exp(-abs(distance) / 0.003);
+        }
+        case 4: {
+            // The planet's moons, high up, lit from the same low sun.
+            var colour = base;
+            for (var index = 0; index < 2; index++) {
+                let centre = select(vec2<f32>(-0.95, 0.88), vec2<f32>(1.25, 1.18), index == 1);
+                let radius = select(0.042, 0.022, index == 1);
+                let offset = q - centre;
+                let disc = 1.0 - smoothstep(radius - 0.0015, radius + 0.0015, length(offset));
+                let sphere = vec3<f32>(offset / radius, sqrt(max(1.0 - dot(offset, offset) / (radius * radius), 0.0)));
+                let light = max(dot(sphere, normalize(vec3<f32>(-0.7, -0.45, 0.55))), 0.0);
+                let surface = vec3<f32>(0.35, 0.45, 0.50) * (0.02 + 0.8 * light) * (0.8 + 0.2 * noise1(offset.x / radius * 4.0 + offset.y / radius * 9.0, 60.0 + f32(index)));
+                colour = mix(colour, surface, disc);
+            }
+            return colour;
+        }
+        case 6: {
+            // A second, higher aurora: thinner, slower, more violet.
+            // Its foot folds and wanders far more than the low one's, so it
+            // reads as drapery rather than a stripe ruled across the panel.
+            let fold = noise1(q.x * 1.4 + time * 0.02, 51.0);
+            let edge = 0.62 + 0.26 * fold + 0.07 * noise1(q.x * 3.1 - time * 0.04, 52.0);
+            let above = q.y - edge;
+            let rays = 0.35 + 0.65 * noise1(q.x * 38.0 + fold * 6.0 + time * 0.1, 53.0);
+            let curtain = smoothstep(-0.02, 0.03, above) * exp(-max(above, 0.0) * 6.0) * rays;
+            let strength = smoothstep(0.3, 0.85, noise1(q.x * 1.1 - time * 0.015, 54.0));
+            let tint = mix(vec3<f32>(0.15, 0.9, 0.5), vec3<f32>(0.6, 0.25, 0.9), smoothstep(0.0, 0.3, above));
+            return base + tint * curtain * strength * 0.35;
+        }
+        default: { return base; }
+    }
+}
+
+fn upperSky(base: vec3<f32>, q: vec2<f32>, stopA: i32, stopB: i32, progress: f32, palette: Palette, time: f32) -> vec3<f32> {
+    let altitude = smoothstep(0.30, 0.60, q.y);
+    var colour = base * mix(1.0, 0.6, smoothstep(0.5, 1.4, q.y));
+    // The milky way: a tilted band of cloud split by a dark dust lane.
+    let bandOffset = q.y - (0.98 + 0.20 * q.x + 0.05 * sin(q.x * 1.3));
+    let profile = exp(-bandOffset * bandOffset / (0.18 * 0.18));
+    if (profile > 0.02) {
+        let cloud = fbm3(vec3<f32>(q * 2.6, time * 0.01), 4);
+        let lane = smoothstep(0.4, 0.7, noise3(vec3<f32>(q.x * 1.6, bandOffset * 8.0 + 3.0, 5.0 + time * 0.006)))
+                 * exp(-pow((bandOffset + 0.02) / 0.06, 2.0));
+        let glow = profile * (0.3 + 1.2 * cloud * cloud) * (1.0 - 0.75 * lane);
+        let tint = mix(vec3<f32>(0.55, 0.50, 0.80), palette.sky * 1.8 + vec3<f32>(0.10), 0.35);
+        colour += tint * glow * 0.075 * altitude;
+        // Its dust of faint stars, too fine to count.
+        let spacing = 0.006;
+        let cell = floor(q / spacing);
+        let seed = vec3<f32>(cell, 71.0);
+        let spot = (cell + 0.2 + 0.6 * vec2<f32>(hash3(seed + 1.0), hash3(seed + 2.0))) * spacing;
+        let core = exp(-dot(q - spot, q - spot) / (0.0007 * 0.0007));
+        colour += vec3<f32>(0.8, 0.8, 1.0) * core * step(1.0 - 0.6 * profile * (0.5 + cloud), hash3(seed)) * 0.35 * altitude;
+    }
+    // A meteor every six seconds or so, somewhere high, gone in under one.
+    let period = 6.0;
+    let epoch = floor(time / period);
+    let elapsed = time - epoch * period;
+    if (elapsed < 0.8) {
+        let start = vec2<f32>(mix(-1.6, 1.6, hash3(vec3<f32>(epoch, 61.0, 1.0))), mix(0.7, 1.3, hash3(vec3<f32>(epoch, 61.0, 2.0))));
+        let heading = normalize(vec2<f32>(select(-0.85, 0.85, hash3(vec3<f32>(epoch, 61.0, 3.0)) > 0.5), -0.5));
+        let relative = q - (start + heading * elapsed * 0.9);
+        let behind = -dot(relative, heading);
+        let aside = abs(relative.x * heading.y - relative.y * heading.x);
+        let streak = exp(-pow(aside / 0.0012, 2.0)) * step(0.0, behind) * exp(-behind / 0.10) * (1.0 - elapsed / 0.8);
+        colour += vec3<f32>(1.3, 1.2, 1.4) * streak * altitude;
+    }
+    // The stops' high landmarks, crossing over and swelling as a switch
+    // passes them, the same as the horizon's. Faded in with altitude like
+    // everything else here: the orbital ring dips below 0.3 out past the
+    // stage's edges, and on the screens beside a laptop it was cut off there
+    // along a ruled line.
+    let reveal = smoothstep(0.1, 0.9, progress);
+    let sky = colour;
+    colour = mix(sky, highLandmark(stopA, sky, q / (1.0 + 0.9 * progress), stopPalette(stopA), time), altitude);
+    if (reveal > 0.0) {
+        let next = mix(sky, highLandmark(stopB, sky, q / (0.6 + 0.4 * progress), stopPalette(stopB), time), altitude);
+        colour = mix(colour, next, reveal);
+    }
+    return colour;
+}
+
 fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
     let place = position - floor(position / 9.0) * 9.0;      // 0..9, so 9.0 is 0.0
     let stopA = i32(floor(place)) % 9;
@@ -451,7 +583,13 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
     // The camera: a level pinhole, the field of view kicking wider and the eye
     // dipping toward the floor at the peak of a surge.
     let focal = FOCAL * (1.0 - 0.18 * motion);
-    let q = vec2<f32>(point.x, point.y - HORIZON) / focal;
+    // THE FRAME: scene units are home-monitor heights from its centre
+    // (layout.rs), so the floor, sun and landmark are composed for that
+    // monitor on every desk. The other monitors are one projection with it:
+    // the horizon and the floor run on across them without a seam, and on a
+    // laptop between two large screens they see much wider.
+    let framed = point;
+    let q = vec2<f32>(framed.x, framed.y - HORIZON) / focal;
     let soft = max(fwidth(q.y), 1e-5);
 
     // The floor: a ray-plane hit. Depth and across, in grid cells.
@@ -468,6 +606,7 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
 
     if (q.y > 0.0) {
         var colour = beyond(q, stopA, stopB, progress, palette, soft, time) + stars(q, time);
+        if (q.y > 0.3) { colour = upperSky(colour, q, stopA, stopB, progress, palette, time); }
         colour += palette.horizon * 0.25 * motion * exp(-q.y * 30.0);    // the horizon flares as you surge
         return colour;
     }

@@ -1,10 +1,8 @@
 // After the scene: temporal accumulation, bloom, and the picture you see.
 // Original, written for hyprpeach.
 
-struct Uniforms {
-    eye: vec4<f32>, forward: vec4<f32>, right: vec4<f32>, up: vec4<f32>,
-    pane: vec4<f32>, sun: vec4<f32>, jitter: vec4<f32>, extra: vec4<f32>, view: vec4<f32>,
-};
+// The same as common.wgsl's, which says what each field is.
+struct Uniforms { desk: vec4<f32>, pane: vec4<f32>, stage: vec4<f32>, jitter: vec4<f32>, output: vec4<f32>, overscan: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var source: texture_2d<f32>;
 @group(0) @binding(2) var history: texture_2d<f32>;
@@ -35,7 +33,7 @@ struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: v
         }
     }
     let previous = clamp(textureSampleLevel(history, linearSampler, input.uv, 0.0).rgb, low, high);
-    return vec4<f32>(mix(previous, current, u.extra.w), 1.0);
+    return vec4<f32>(mix(previous, current, u.output.w), 1.0);
 }
 
 // BLOOM, down: a 13-tap filter per level (Jimenez 2014), which stays stable as
@@ -89,11 +87,13 @@ fn filmic(x: vec3<f32>) -> vec3<f32> {
 // The picture: the resolved scene, upscaled to the panel, bloom laid over it,
 // exposed, tone-mapped, a whisper of grain. `history` here is the bloom.
 @fragment fn present(input: VertexOutput) -> @location(0) vec4<f32> {
-    let scene = textureSampleLevel(source, linearSampler, input.uv, 0.0).rgb;
-    let bloom = textureSampleLevel(history, linearSampler, input.uv, 0.0).rgb;
+    // Only the monitor itself: the overscan around it was drawn for the bloom.
+    let inner = (input.uv + u.overscan.xy) / (1.0 + 2.0 * u.overscan.xy);
+    let scene = textureSampleLevel(source, linearSampler, inner, 0.0).rgb;
+    let bloom = textureSampleLevel(history, linearSampler, inner, 0.0).rgb;
     var col = mix(scene, bloom, 0.07);
     col = filmic(col * 0.75);
-    let grain = fract(sin(dot(input.uv * u.extra.xy + u.extra.z, vec2<f32>(12.9898, 78.233))) * 43758.5453) - 0.5;
+    let grain = fract(sin(dot(input.uv * u.output.xy + u.output.z, vec2<f32>(12.9898, 78.233))) * 43758.5453) - 0.5;
     col += grain * 0.006;
     return vec4<f32>(col, 1.0);   // the surface is sRGB: the hardware encodes
 }

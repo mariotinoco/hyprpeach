@@ -1,64 +1,83 @@
 # Orbit
 
-Your desk as the windows of a station in low orbit. Behind your desktops, a
-planet turns beneath you — NASA's imagery of the Earth under a physically
-scattered atmosphere, real-time, with clouds, sun glint on the oceans and city
-lights on the night side — seen as one continuous view across every monitor,
-each one a pane of the same window.
+A living scene behind your desktops: nine places in one world, one for each
+desktop, drawn in real time as one picture across every monitor. Switching
+desktops flies you from one to the next.
 
 ```bash
 hyprpeach plugin add orbit
 ```
 
 It needs [desktops](../../README.md#more-plugins). The first add builds the
-renderer (a few minutes) and fetches the planet (about 85 MB).
+renderer, which takes a few minutes.
 
-## The desk is a torus
+## Scenes
 
-Nine desktops, a 3 × 3. **Columns are bearings** around the station, 120°
-apart; **rows are positions along its orbit**, 120° apart. Both wrap, so every
-step is the same move:
+```bash
+hyprpeach scene              # the scenes, and which is showing
+hyprpeach scene nebula       # show another; it is remembered
+```
 
-- **1 → 2 → 3** turns right, a third of the way round each time.
-- **3 → 4**, and **9 → 1**, turn right and move a third of the way along the
-  orbit — no wilder than any other step, and the wrap closes rather than flips.
-- A jump turns the short way on both, so nothing ever swings more than 120°.
+**synthwave** (the default) — a neon grid running to a banded sun. Each
+desktop is its own hour of the night with its own landmark on the horizon:
+wireframe mountains, pyramids, a city skyline, a ring gate, a ringed planet,
+red spires, an aurora, palms under a crescent, an eclipse. A switch is a surge
+forward along the grid while the next landmark rises out of the haze.
 
-Moving along the orbit moves the sun: **row 1 is day, row 2 a low golden sun on
-the terminator, row 3 the night side**, city lights and the green airglow on
-the limb.
+**nebula** — drifting inside an emission nebula. Each desktop is its own
+region: dust pillars, a young cluster, a dust lane, a bubble, a cliff of gas.
+A switch is a flight forward through the gas, near clouds streaming past and
+the stars streaking.
+
+Every desktop looks different from every other, so you know which one you are
+on without reading a number, and the overview's nine cells are nine places
+rather than nine copies of a wallpaper.
+
+## On your monitors
+
+The picture is composed around **the monitor at eye level** — the one holding
+desktops 1–9 — and the rest of the desk sees what is around it:
+
+- **Two panels stacked:** the scene's subject on the bottom panel, the sky
+  going on up through the top one.
+- **A laptop between two larger screens:** the subject on the laptop, the
+  horizon running on across both screens either side.
+- **Two screens side by side:** the subject on the first, the second a wing.
+- **A laptop on its own:** the whole of it.
+
+Bezels are window frames onto one picture: a line that leaves one monitor
+enters the next where it would.
 
 ## In the overview
 
-`SUPER + TAB` or `SUPER + 0` shows the grid as it is: each cell is its
-desktop's viewport, and the three in a row are three 120° slices of one ring —
-the coastline leaving the right edge of one cell enters the left of the next.
-Between them, the universe they look into.
+`SUPER + 0` shows all nine desktops on every monitor, a 3 × 3 in that
+monitor's shape. Each cell is that desktop's scene as your eye-level monitor
+sees it, still moving, with that monitor's windows laid over it.
 
 ## Cost
 
-It idles at ten fresh frames a second, re-presenting the last one in between,
-and draws every frame only while moving or with the overview open. Measured on
-two 7680 × 2160 panels with an RTX 5090: about 8% of the GPU at rest. On
-integrated graphics it is untested; `HYPRPEACH_SCALE` (default `0.5`) is the
-internal resolution.
+Every frame is drawn fresh at the monitor's rate, at half resolution with
+temporal anti-aliasing to recover the detail. Measured on two 7680 × 2160
+panels with an RTX 5090: 60 fps per panel for each scene. Integrated graphics
+is untested; `HYPRPEACH_SCALE` (default `0.5`) sets the internal resolution.
 
 ## What it is
 
 A native renderer — Rust and [wgpu](https://wgpu.rs), in `renderer/` — drawn
-on each monitor's background layer. Per frame: single scattering through the
-atmosphere (Rayleigh and Mie), the planet with exaggerated relief and GGX ocean
-glint, temporal anti-aliasing, a six-level bloom, and a filmic tone curve. The
-service in `Orbit.qml` keeps it running and rebuilds it when an update changes
-its source; `prepare` does the building and fetching.
+on each monitor's background layer. A scene is one shader in
+`renderer/src/scenes/`; `renderer/src/common.wgsl` says what it has to define.
+The service in `Orbit.qml` keeps the renderer running and rebuilds it when an
+update changes its source; `prepare` does the building.
 
-Built files live outside the plugin: the program and imagery in
-`~/.local/share/hyprpeach/orbit`, the build in `~/.cache/hyprpeach`. Removing
-the plugin leaves them; delete those two folders to reclaim the space.
+To see a scene on a desk you do not have, give the renderer that desk's
+`hyprctl -j monitors`:
 
-## Imagery
+```bash
+~/.local/share/hyprpeach/orbit/hyprpeach-orbit preview monitors.json desk.png
+```
 
-All NASA, public domain: Blue Marble Next Generation (day), Black Marble 2016
-(night lights), the cloud composite, GEBCO elevation via NASA Earth
-Observatory, and the LRO colour Moon from NASA's Scientific Visualization
-Studio.
+`renderer/layouts/` holds the four desks above.
+
+The program lives in `~/.local/share/hyprpeach/orbit` and the build in
+`~/.cache/hyprpeach`. Removing the plugin leaves them; delete those two folders
+to reclaim the space.

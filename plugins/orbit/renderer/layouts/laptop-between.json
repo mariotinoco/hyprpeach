@@ -1,0 +1,5 @@
+[
+  { "name": "DP-2", "x": 0, "y": 0, "width": 3840, "height": 2160, "scale": 1, "transform": 0, "activeWorkspace": { "id": 11 } },
+  { "name": "eDP-1", "x": 3840, "y": 480, "width": 1920, "height": 1200, "scale": 1, "transform": 0, "activeWorkspace": { "id": 1 } },
+  { "name": "DP-1", "x": 5760, "y": 0, "width": 3840, "height": 2160, "scale": 1, "transform": 0, "activeWorkspace": { "id": 21 } }
+]

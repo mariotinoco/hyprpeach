@@ -176,7 +176,7 @@ $ hyprpeach plugin remove desktops
 | Plugin | |
 |---|---|
 | [**desktops**](#how-it-works) — Multi-Monitor Desktops | A desktop that spans every monitor and turns as one: the library, [the bar strip](#the-bar-strip), and the overlay. Two monitors, three, one [held](#holding-a-panel) while the rest move. |
-| [**orbit**](plugins/orbit/README.md) — Orbit | Your desk as the windows of a station in low orbit: a real-time planet from NASA imagery behind every desktop, one continuous view across your monitors, and every switch a turn around the station. Needs desktops. |
+| [**orbit**](plugins/orbit/README.md) — Orbit | A living scene behind your desktops — synthwave or a nebula — with a different place for each desktop, one picture across your monitors, and every switch a flight to the next. Needs desktops. |
 | [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + TAB` shows every desktop at once, on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
 | [**dev-ports**](plugins/dev-ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
 

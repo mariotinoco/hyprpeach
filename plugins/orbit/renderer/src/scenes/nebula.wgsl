@@ -19,13 +19,18 @@ const NEBULA_CLUSTER: i32 = 1;
 const NEBULA_LANE: i32 = 2;
 const NEBULA_SHELL: i32 = 3;
 const NEBULA_CLIFFS: i32 = 4;
+const NEBULA_SHELL_RADIUS: f32 = 0.34;  // stage heights: the bubble fills two thirds of the home monitor's height
 
 // One region of the nebula: what a desktop looks out on.
 struct Region {
     core: vec3<f32>,    // the hot ionised gas nearest the landmark
     outer: vec3<f32>,   // the cooler gas toward the edges of the view
     dust: vec3<f32>,    // the reddened light that dust lets through or scatters
-    centre: vec2<f32>,  // where on the desk the landmark sits, desk heights
+    // Where the landmark sits, in STAGE HEIGHTS from the home monitor's centre
+    // (see scene()). Kept within 0.3 across, so it fits a 16:10 laptop's
+    // +-0.8, and low, so its glow is spent before the stage's top edge: bloom
+    // is per monitor, and a bright patch at a bezel shows a step across it.
+    centre: vec2<f32>,
     kind: i32,          // which landmark: NEBULA_PILLARS, _CLUSTER, _LANE, _SHELL, _CLIFFS
     lean: f32,          // radians: the tilt of a lane or of the pillars
 };
@@ -35,21 +40,21 @@ struct Region {
 fn region(index: i32) -> Region {
     switch index {
         // Pillars of Creation: teal oxygen above amber-brown columns.
-        case 0: { return Region(vec3<f32>(0.20, 0.85, 0.80), vec3<f32>(0.90, 0.48, 0.16), vec3<f32>(0.55, 0.25, 0.10), vec2<f32>(0.10, 0.22), NEBULA_PILLARS, 0.08); }
+        case 0: { return Region(vec3<f32>(0.20, 0.85, 0.80), vec3<f32>(0.90, 0.48, 0.16), vec3<f32>(0.55, 0.25, 0.10), vec2<f32>(0.10, 0.06), NEBULA_PILLARS, 0.08); }
         // A young blue cluster carving a magenta hydrogen cloud.
-        case 1: { return Region(vec3<f32>(1.00, 0.25, 0.55), vec3<f32>(0.30, 0.16, 0.70), vec3<f32>(0.50, 0.10, 0.20), vec2<f32>(-0.35, 0.05), NEBULA_CLUSTER, 0.0); }
+        case 1: { return Region(vec3<f32>(1.00, 0.25, 0.55), vec3<f32>(0.30, 0.16, 0.70), vec3<f32>(0.50, 0.10, 0.20), vec2<f32>(-0.30, 0.0), NEBULA_CLUSTER, 0.0); }
         // Gold gas split by one great dark lane.
         case 2: { return Region(vec3<f32>(1.00, 0.66, 0.26), vec3<f32>(0.60, 0.20, 0.08), vec3<f32>(0.45, 0.20, 0.06), vec2<f32>(0.20, -0.05), NEBULA_LANE, 0.55); }
         // A blown shell: an oxygen-green ring rimmed in hydrogen red.
         case 3: { return Region(vec3<f32>(0.20, 0.90, 0.60), vec3<f32>(0.95, 0.16, 0.12), vec3<f32>(0.40, 0.10, 0.08), vec2<f32>(0.25, 0.02), NEBULA_SHELL, 0.0); }
         // Cosmic Cliffs: an orange ridge under a blue sky.
-        case 4: { return Region(vec3<f32>(0.30, 0.55, 1.00), vec3<f32>(1.00, 0.45, 0.15), vec3<f32>(0.60, 0.28, 0.10), vec2<f32>(-0.20, 0.35), NEBULA_CLIFFS, -0.06); }
+        case 4: { return Region(vec3<f32>(0.30, 0.55, 1.00), vec3<f32>(1.00, 0.45, 0.15), vec3<f32>(0.60, 0.28, 0.10), vec2<f32>(-0.15, 0.14), NEBULA_CLIFFS, -0.06); }
         // A Pleiades-like cluster in blue reflection haze.
-        case 5: { return Region(vec3<f32>(0.40, 0.62, 1.00), vec3<f32>(0.08, 0.16, 0.45), vec3<f32>(0.20, 0.20, 0.35), vec2<f32>(0.30, 0.08), NEBULA_CLUSTER, 0.0); }
+        case 5: { return Region(vec3<f32>(0.40, 0.62, 1.00), vec3<f32>(0.08, 0.16, 0.45), vec3<f32>(0.20, 0.20, 0.35), vec2<f32>(0.28, 0.02), NEBULA_CLUSTER, 0.0); }
         // Rose-crimson gas with a lane sloping the other way.
         case 6: { return Region(vec3<f32>(1.00, 0.30, 0.32), vec3<f32>(0.45, 0.08, 0.35), vec3<f32>(0.50, 0.12, 0.10), vec2<f32>(-0.15, 0.0), NEBULA_LANE, -0.45); }
         // A violet shell around a hot white dwarf, cyan at its heart.
-        case 7: { return Region(vec3<f32>(0.30, 0.80, 1.00), vec3<f32>(0.62, 0.28, 1.00), vec3<f32>(0.30, 0.12, 0.40), vec2<f32>(-0.30, -0.02), NEBULA_SHELL, 0.0); }
+        case 7: { return Region(vec3<f32>(0.30, 0.80, 1.00), vec3<f32>(0.62, 0.28, 1.00), vec3<f32>(0.30, 0.12, 0.40), vec2<f32>(0.08, -0.02), NEBULA_SHELL, 0.0); }
         // An old gold globular cluster in teal gas.
         default: { return Region(vec3<f32>(1.00, 0.82, 0.55), vec3<f32>(0.10, 0.45, 0.48), vec3<f32>(0.35, 0.25, 0.12), vec2<f32>(0.05, 0.05), NEBULA_CLUSTER, 0.0); }
     }
@@ -66,7 +71,7 @@ fn starTint(seed: f32) -> vec3<f32> {
 }
 
 // A field of faint stars, one chance per cell, too small to need neighbours.
-// `cellSize` in desk heights; `chance` the share of cells that hold one.
+// `cellSize` in stage heights; `chance` the share of cells that hold one.
 fn starField(point: vec2<f32>, cellSize: f32, chance: f32, seed: f32, radius: f32) -> vec3<f32> {
     let grid = point / cellSize;
     let cell = floor(grid);
@@ -107,8 +112,8 @@ fn brightStars(point: vec2<f32>, seed: f32) -> vec3<f32> {
 }
 
 // The outline of a pillar region's columns, or a cliff region's ridge, as a
-// rough signed distance in desk heights (negative inside). `local` is measured
-// from the bottom of the desk, x across and y up, already leaned.
+// rough signed distance in stage heights (negative inside). `local` is measured
+// from the bottom of the stage, x across and y up, already leaned.
 fn landmarkShape(local: vec2<f32>, kind: i32, seed: f32) -> f32 {
     if (kind == NEBULA_CLIFFS) {
         // One ragged ridge: a few sines are enough, the noise erodes it later.
@@ -146,7 +151,10 @@ fn farNebula(point: vec2<f32>, index: i32, time: f32) -> vec3<f32> {
     let fromCentre = point - place.centre;
     let reach = length(fromCentre);
     // The landmark's own light: the stars that ionise the gas around it.
-    let glow = exp(-reach * reach / 0.22);
+    // Tighter up and down than across: the stage is one unit tall but
+    // three or more wide, and a glow as tall as it is wide would still be
+    // bright at the stage's top edge, where the panel above blooms apart.
+    let glow = exp(-(fromCentre.x * fromCentre.x / 0.22 + fromCentre.y * fromCentre.y / 0.09));
 
     let gas = smoothstep(0.36, 0.70, density);
     // Bright rims where the density crosses its middle: the shock fronts and
@@ -199,7 +207,7 @@ fn farNebula(point: vec2<f32>, index: i32, time: f32) -> vec3<f32> {
         // A bubble blown by one hot star's wind: the gas inside swept out, the
         // swept-up gas a thin, broken skin brightest on one side. A filled
         // glowing disc would read as a planet, which this is not.
-        let radius = 0.34;
+        let radius = NEBULA_SHELL_RADIUS;
         colour *= mix(0.07, 1.0, smoothstep(radius * 0.6, radius * 1.05, reach));
         let shellDistance = reach - radius + (density - 0.5) * 0.12;
         let shell = exp(-shellDistance * shellDistance / 0.0005);
@@ -267,6 +275,10 @@ fn planeStars(point: vec2<f32>, depth: f32, identity: f32, motion: f32) -> vec3<
 }
 
 fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
+    // Scene units are home-monitor heights from its centre (layout.rs), so
+    // every landmark is composed to sit inside that monitor and the others
+    // see the nebula running on around it.
+    let framed = point;
     let wrapped = position - 9.0 * floor(position / 9.0);
     let index = floor(wrapped);
     let progress = smoothstep(0.25, 0.75, wrapped - index);
@@ -276,8 +288,12 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
     // The far picture: the region being left swells and fades, the next one
     // grows in from further off. Each is drawn only while it shows.
     var colour = vec3<f32>(0.0);
-    if (progress < 0.999) { colour += farNebula(point / (1.0 + 1.4 * progress), current, time) * (1.0 - progress); }
-    if (progress > 0.001) { colour += farNebula(point * (1.0 + 0.7 * (1.0 - progress)), next, time) * progress; }
+    if (progress < 0.999) { colour += farNebula(framed / (1.0 + 1.4 * progress), current, time) * (1.0 - progress); }
+    if (progress > 0.001) { colour += farNebula(framed * (1.0 + 0.7 * (1.0 - progress)), next, time) * progress; }
+    // Above the stage the far gas settles a little -- the panel over the home
+    // monitor a rich continuation, not a rival -- so the eye comes back down
+    // to the landmark. Smooth across the bezel, or it would read as a step.
+    colour *= mix(1.0, 0.72, smoothstep(0.35, 1.5, framed.y));
 
     // The near planes, back to front. Their places along the flight are
     // whole multiples of the spacing; a plane's identity is its slot in the
@@ -294,13 +310,13 @@ fn scene(position: f32, point: vec2<f32>, motion: f32, time: f32) -> vec3<f32> {
         let blend = smoothstep(0.5, 1.0, fract(along));
         let tint = mix(mix(region(home).outer, region(home).core, 0.4), mix(region((home + 1) % 9).outer, region((home + 1) % 9).core, 0.4), blend);
         let offset = vec2<f32>(hash3(vec3<f32>(identity, 1.0, 0.0)), hash3(vec3<f32>(identity, 2.0, 0.0))) * 50.0;
-        let cloud = fbm3(vec3<f32>(point * depth * 2.4 + offset, identity * 1.7), 3);
+        let cloud = fbm3(vec3<f32>(framed * depth * 2.4 + offset, identity * 1.7), 3);
         if (i32(identity) % 2 == 0) {
             colour += tint * smoothstep(0.52, 0.85, cloud) * 0.07 * fade;
         } else {
             colour *= 1.0 - smoothstep(0.52, 0.80, cloud) * 0.55 * fade;
         }
-        colour += planeStars(point, depth, identity, motion) * fade;
+        colour += planeStars(framed, depth, identity, motion) * fade;
     }
     return colour;
 }

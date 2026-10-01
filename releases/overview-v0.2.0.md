@@ -1,5 +1,5 @@
-# the 3 × 3, and windows onto orbit
+# the 3 × 3 on every monitor
 
-The overview is now always the desk's own 3 × 3. `SUPER + 0` opens it as well as `SUPER + TAB`, and `0` closes it again.
+The overview is now always the desk's own 3 × 3, shown on every monitor in that monitor's shape — a laptop gets laptop-shaped cells, a wide screen wide ones. `SUPER + 0` opens it as well as `SUPER + TAB`, and `0` closes it again.
 
-With the orbit plugin running, each cell becomes its desktop's viewport onto the planet, and the three cells in a row join edge to edge into one 360° view.
+With the orbit plugin running, every cell is that desktop's scene, still moving, under its windows.

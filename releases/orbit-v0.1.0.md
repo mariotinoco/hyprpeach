@@ -1,11 +1,12 @@
-# your desk as the windows of a station in low orbit
+# a living scene behind every desktop
 
-Behind your desktops, a planet turns beneath you: NASA's imagery of the Earth under a physically scattered atmosphere, in real time — clouds, sun glint on the oceans, city lights and the green airglow on the night side. Every monitor is a pane of the same window, so the view runs continuously across your desk.
+Behind your desktops, one scene in real time — a neon synthwave grid running to a banded sun, or the inside of a nebula — with a different place in it for each of the nine desktops: its own colours, its own landmark. You know which desktop you are on without reading a number.
 
-Each desktop is a place on the station. Moving right along a row turns you a third of the way round; moving down a row carries you a third of the way along the orbit, from day to the terminator to night. Every switch is the same smooth move — 3 → 4 and 9 → 1 included — and nothing ever swings more than 120°.
+Switching flies you from one place to the next: a surge along the grid, a flight through the gas. Every switch is the same move forward, 9 → 1 included.
 
-In the overview, every cell is its desktop's viewport.
+The picture runs across all your monitors as one, composed around the one at eye level: on two stacked panels the subject sits on the bottom one and the sky goes on up through the top; on a laptop between two larger screens the horizon runs on across both; a laptop on its own gets the whole of it.
 
     hyprpeach plugin add orbit
+    hyprpeach scene nebula
 
-Needs Rust and ImageMagick; the first add builds the renderer and fetches the planet. At rest it draws ten frames a second.
+Needs Rust; the first add builds the renderer. Every frame is drawn fresh — measured at 60 fps on two 7680 × 2160 panels.

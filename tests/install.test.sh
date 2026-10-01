@@ -97,24 +97,14 @@ case "${1:-}" in
   configerrors) echo "" ;;
 esac
 FAKE
-# orbit's prepare builds with cargo and fetches with curl and magick. The fakes
-# make the file each would make, so the rest of the step runs for real: the
-# stamp, the install, the skip when nothing changed.
+# orbit's prepare builds with cargo. The fake makes the file cargo would make,
+# so the rest of the step runs for real: the stamp, the install, the skip when
+# nothing changed.
 cat > "$FAKES/cargo" <<'FAKE'
 #!/usr/bin/env bash
 printf 'cargo %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
 while (( $# )); do [[ $1 == --target-dir ]] && target=$2; shift; done
 mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-orbit" && chmod +x "$target/release/hyprpeach-orbit"
-FAKE
-cat > "$FAKES/curl" <<'FAKE'
-#!/usr/bin/env bash
-printf 'curl %s\n' "${@: -1}" >> "$HYPRPEACH_TEST_LOG"
-while (( $# )); do [[ $1 == -o ]] && echo original > "$2"; shift; done
-FAKE
-cat > "$FAKES/magick" <<'FAKE'
-#!/usr/bin/env bash
-printf 'magick\n' >> "$HYPRPEACH_TEST_LOG"
-echo prepared > "${@: -1}"
 FAKE
 chmod +x "$FAKES"/*
 
@@ -131,7 +121,7 @@ use_home() {
 }
 
 use_home guard
-for name in omarchy omarchy-shell hyprctl cargo curl magick; do
+for name in omarchy omarchy-shell hyprctl cargo; do
   [[ $(command -v "$name") == "$FAKES/$name" ]] || { echo "REFUSING TO RUN: $name resolves to $(command -v "$name"), not the fake"; exit 1; }
 done
 [[ $HOME == "$SANDBOX"/* ]] || { echo "REFUSING TO RUN: HOME is $HOME"; exit 1; }
@@ -344,24 +334,23 @@ check "overview comes off on its own" "$([[ -L $(plugins_directory)/hyprpeach.ov
 echo
 echo "a plugin that builds is prepared before it is linked, and only when stale"
 : > "$LOG"
+# What an earlier build left: the planet scene's NASA imagery.
+mkdir -p "$HOME/.local/share/hyprpeach/orbit/assets" && echo map > "$HOME/.local/share/hyprpeach/orbit/assets/day.jpg"
 hyprpeach plugin add orbit > "$SANDBOX/orbit.out" 2>&1
 check "adding orbit succeeds" "$?" "0"
 check "it is linked" "$(link_of hyprpeach.orbit)" "hyprpeach/plugins/orbit"
 check "its renderer was built once" "$(grep -c '^cargo build' "$LOG")" "1"
 check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/orbit/hyprpeach-orbit ]] && echo yes)" "yes"
-check "the planet's five maps were fetched" "$(grep -c '^curl ' "$LOG")" "5"
-check "  ...and laid down" "$(ls "$HOME/.local/share/hyprpeach/orbit/assets" | wc -l)" "5"
-check "no download is left half-written" "$(find "$HOME/.local/share/hyprpeach/orbit/assets" -name '.*' | wc -l)" "0"
+check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/orbit/assets ]] && echo left || echo gone)" "gone"
 : > "$LOG"
 "$PLUGIN/plugins/orbit/prepare" --if-stale
-check "starting again with nothing changed builds and fetches nothing" "$(grep -c '^cargo\|^curl' "$LOG")" "0"
+check "starting again with nothing changed builds nothing" "$(grep -c '^cargo' "$LOG")" "0"
 echo "// changed" >> "$SANDBOX/work/plugins/orbit/renderer/src/main.rs"
 git_quietly -C "$SANDBOX/work" commit --quiet -am "the renderer changed"
 git -C "$SANDBOX/work" push --quiet "$UPSTREAM" "HEAD:$(git -C "$UPSTREAM" symbolic-ref --short HEAD)"
 omarchy plugin update hyprpeach --yes >/dev/null 2>&1
 "$PLUGIN/plugins/orbit/prepare" --if-stale >/dev/null 2>&1
 check "after an update changes the renderer, it is rebuilt" "$(grep -c '^cargo build' "$LOG")" "1"
-check "  ...without fetching the planet again" "$(grep -c '^curl ' "$LOG")" "0"
 hyprpeach plugin remove orbit >/dev/null 2>&1
 check "orbit comes off" "$([[ -L $(plugins_directory)/hyprpeach.orbit ]] && echo linked || echo none)" "none"
 

@@ -5,9 +5,8 @@ import Quickshell.Io
 // Keeps the orbit renderer running behind the desk.
 //
 // The scene is drawn by a native program (renderer/, Rust and wgpu) rather
-// than in QML: a physically scattered atmosphere, temporal anti-aliasing and
-// bloom need compute-grade passes and history buffers the shell's shaders do
-// not have. This service is only its keeper -- it brings the build up to date
+// than in QML: temporal anti-aliasing and bloom need history buffers and a
+// chain of passes the shell's shaders do not have. This service is only its keeper -- it brings the build up to date
 // when an update moved the source on, starts it, restarts it if it falls over,
 // and publishes whether it is running for the overview to read.
 Item {
@@ -33,7 +32,6 @@ Item {
   Process {
     id: renderer
     command: [root.dataDirectory + "/hyprpeach-orbit"]
-    environment: ({ HYPRPEACH_ASSETS: root.dataDirectory + "/assets" })
     onRunningChanged: marker.setText(renderer.running ? "running\n" : "")
     // A renderer that falls over is started again, backing off, and given up
     // on after five tries rather than spinning a GPU driver bug into a loop.

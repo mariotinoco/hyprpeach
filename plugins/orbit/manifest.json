@@ -4,7 +4,7 @@
   "name": "Orbit",
   "version": "0.1.0",
   "author": "hyprpeach",
-  "description": "Your multi-monitor desk as the windows of a space station in low orbit: a real-time, physically lit planet from NASA imagery behind your desktops, one continuous view across every monitor, and every desktop switch a turn around the station.",
+  "description": "A living scene behind your desktops — a synthwave grid or a nebula — with a different place for every desktop, one picture across every monitor, and every desktop switch a flight to the next.",
   "kinds": [
     "service"
   ],

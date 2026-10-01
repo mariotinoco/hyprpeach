@@ -8,11 +8,18 @@
 //     The picture for the desk at `position`: desktop N is position N - 1,
 //     and between whole numbers the desk is on its way. The scene MUST repeat
 //     every 9 so 9 -> 1 is a step forward like any other (the camera steps
-//     8.0 -> 9.0, which has to look the same as 0.0). `point` is where on the
-//     desk, in desk heights from its centre, y up -- one picture across every
-//     monitor, the bezels being window frames onto it. `motion` is 0 at rest
+//     8.0 -> 9.0, which has to look the same as 0.0). `motion` is 0 at rest
 //     and peaks at 1 halfway through a switch. Linear HDR out; the post passes
 //     add bloom and tone-map.
+//
+//     `point` is where on the desk, in SCENE UNITS: the origin at the centre
+//     of the home monitor -- the one at eye level, holding workspaces 1-9 --
+//     y up, one unit its height (layout.rs). One picture runs across every monitor, the
+//     bezels being window frames onto it, but it is COMPOSED for the home
+//     monitor: the subject belongs inside u.stage, and the other monitors
+//     see what is around it. Across the desks this has to serve, a point can
+//     be anywhere from about -4 to 4 across (a laptop between two 4K
+//     screens) and -1 to 1.5 up (two stacked panels).
 //
 //   fn backdrop(point: vec2<f32>, time: f32) -> vec3<f32>
 //     What shows between the overview's cells.
@@ -20,25 +27,14 @@
 // Original, written for hyprpeach.
 
 struct Uniforms {
-    eye: vec4<f32>,      // xyz camera (km, planet at origin); w time (s)
-    forward: vec4<f32>,  // w: the desk's position, in desktops: N - 1 at desktop N, unbounded (take it mod 9)
-    right: vec4<f32>,    // w: desk width in desk heights
-    up: vec4<f32>,       // w: how hard the camera is moving, 0..1
-    pane: vec4<f32>,     // this monitor on the desk: x, y (top-left, y down), width, height
-    sun: vec4<f32>,      // xyz direction to a scene's sun; w a slow drift for its sky (radians)
+    desk: vec4<f32>,     // x time (s); y position (desktops: N - 1 at desktop N, unbounded); z motion 0..1; w overview open 0/1
+    pane: vec4<f32>,     // this monitor in scene units: left, top (y up), width, height
+    stage: vec4<f32>,    // the home monitor, the same way: the picture is composed for it
     jitter: vec4<f32>,   // xy sub-pixel jitter; zw internal size
-    extra: vec4<f32>,    // xy output size; z frame; w history blend
-    view: vec4<f32>,     // y overview open 0/1; x, z, w unused
+    output: vec4<f32>,   // xy output size; z frame; w history blend
+    overscan: vec4<f32>, // xy how far past each edge the drawing runs, as a fraction of the monitor (renderer.rs says why)
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
-// The planet imagery (NASA, public domain), bound for every scene; a scene that
-// does not sample it costs nothing for it.
-@group(1) @binding(0) var dayMap: texture_2d<f32>;
-@group(1) @binding(1) var nightMap: texture_2d<f32>;
-@group(1) @binding(2) var cloudMap: texture_2d<f32>;
-@group(1) @binding(3) var heightMap: texture_2d<f32>;
-@group(1) @binding(4) var moonMap: texture_2d<f32>;
-@group(1) @binding(5) var mapSampler: sampler;
 
 struct VertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> };
 @vertex fn vs(@builtin(vertex_index) index: u32) -> VertexOutput {
@@ -95,23 +91,27 @@ fn overviewCell(local: vec2<f32>) -> Cell {
     return cell;
 }
 
-// A place on this monitor (0..1, y down) as a point on the desk's one picture.
-fn deskPoint(local: vec2<f32>) -> vec2<f32> {
-    let desk = u.pane.xy + local * u.pane.zw;
-    return vec2<f32>(desk.x - u.right.w * 0.5, 0.5 - desk.y);
+// A place on this monitor (0..1, y down) as a point in the scene.
+fn scenePoint(local: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(u.pane.x + local.x * u.pane.z, u.pane.y - local.y * u.pane.w);
 }
 
 @fragment fn fs(input: VertexOutput) -> @location(0) vec4<f32> {
-    let local = (input.uv * u.jitter.zw + u.jitter.xy) / u.jitter.zw;
-    let time = u.eye.w;
-    if (u.view.y > 0.5) {
-        // Each cell is THIS monitor's part of desktop N, as it is at rest:
-        // what the monitor would show if you chose it.
+    let drawn = (input.uv * u.jitter.zw + u.jitter.xy) / u.jitter.zw;
+    let local = drawn * (1.0 + 2.0 * u.overscan.xy) - u.overscan.xy;
+    let time = u.desk.x;
+    if (u.desk.w > 0.5) {
+        // Every cell, on every monitor, is desktop N as the home monitor sees
+        // it at rest -- the composed picture, so all nine read at a glance on
+        // any monitor -- cropped to the cell's shape around its centre.
         let cell = overviewCell(local);
         if (cell.inside) {
-            return vec4<f32>(scene(f32(cell.desktop - 1), deskPoint(cell.local), 0.0, time), 1.0);
+            let stageCentre = vec2<f32>(u.stage.x + u.stage.z * 0.5, u.stage.y - u.stage.w * 0.5);
+            let aspect = u.pane.z / u.pane.w;
+            let point = stageCentre + vec2<f32>((cell.local.x - 0.5) * aspect, 0.5 - cell.local.y) * u.stage.w;
+            return vec4<f32>(scene(f32(cell.desktop - 1), point, 0.0, time), 1.0);
         }
-        return vec4<f32>(backdrop(deskPoint(local), time), 1.0);
+        return vec4<f32>(backdrop(scenePoint(local), time), 1.0);
     }
-    return vec4<f32>(scene(u.forward.w, deskPoint(local), u.up.w, time), 1.0);
+    return vec4<f32>(scene(u.desk.y, scenePoint(local), u.desk.z, time), 1.0);
 }
