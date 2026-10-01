@@ -97,12 +97,23 @@ Item {
   // and flashed a number when nothing had moved. peach.focus_desktop fires
   // `hyprpeach-desktop,N` after every paired switch -- however it was asked
   // for: a key, a click on the strip, a script -- and only then.
+  //
+  // NOT WHILE THE OVERVIEW IS OPEN. A switch made there -- a cell, or a
+  // number key pressed over the grid -- is one you watched happen: the
+  // overview closes onto the desktop you chose, and a number over it is noise.
+  // The overview announces itself open and closed; a switch arrives while it
+  // still counts as open, because it closes on that same switch.
+  property bool overviewOpen: false
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
       if (event.name !== "custom") return
       var data = String(event.data || "")
+      if (data === "hyprpeach-overview,open") { root.overviewOpen = true; return }
+      if (data === "hyprpeach-overview,closed") { root.overviewOpen = false; return }
       if (data.indexOf("hyprpeach-desktop,") !== 0) return
+      if (root.overviewOpen) return
       var next = parseInt(data.substring("hyprpeach-desktop,".length), 10)
       if (!(next > 0)) return
       root.desktop = next

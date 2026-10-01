@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Keeps the animated-desktops renderer running behind the desk.
+// Keeps the animated renderer running behind the desk.
 //
 // The scene is drawn by a native program (renderer/, Rust and wgpu) rather
 // than in QML: temporal anti-aliasing and bloom need history buffers and a
@@ -13,7 +13,7 @@ Item {
   id: root
 
   readonly property string pluginDirectory: Qt.resolvedUrl(".").toString().replace(/^file:\/\//, "").replace(/\/$/, "")
-  readonly property string dataDirectory: Quickshell.env("HOME") + "/.local/share/hyprpeach/animated-desktops"
+  readonly property string dataDirectory: Quickshell.env("HOME") + "/.local/share/hyprpeach/animated"
   property int failures: 0
 
   // `--if-stale`: returns at once when the build matches the source. After an
@@ -28,14 +28,14 @@ Item {
     // behind the desk beats none. With no build at all, the renderer fails to
     // start and the backoff below gives up on it.
     onExited: function(exitCode) {
-      if (exitCode !== 0) console.warn("hyprpeach animated-desktops: prepare failed; starting the last build:", prepareErrors.text)
+      if (exitCode !== 0) console.warn("hyprpeach animated: prepare failed; starting the last build:", prepareErrors.text)
       renderer.running = true
     }
   }
 
   Process {
     id: renderer
-    command: [root.dataDirectory + "/hyprpeach-animated-desktops"]
+    command: [root.dataDirectory + "/hyprpeach-animated"]
     onRunningChanged: {
       marker.setText(renderer.running ? "running\n" : "")
       if (renderer.running) steady.restart()
@@ -47,7 +47,7 @@ Item {
     onExited: {
       root.failures++
       if (root.failures < 5) restart.start()
-      else console.warn("hyprpeach animated-desktops: the renderer keeps stopping; giving up until the shell restarts")
+      else console.warn("hyprpeach animated: the renderer keeps stopping; giving up until the shell restarts")
     }
   }
 
@@ -69,7 +69,7 @@ Item {
   // cells see-through for the renderer to draw the viewports in.
   FileView {
     id: marker
-    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated-desktops"
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated"
     printErrors: false
   }
 

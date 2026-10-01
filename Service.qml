@@ -15,9 +15,21 @@ import Quickshell.Io
 // links itself; it does nothing when the link is already right, and it never
 // takes a file that is not hyprpeach's. bin/hyprpeach says exactly what it
 // will and will not replace.
+//
+// And A PLUGIN THAT CHANGED NAME, CARRIED OVER. `omarchy plugin update` moves
+// the clone and has the shell load its plugins again, which runs this --
+// already the new release's -- so a renamed plugin's link, bar place and
+// files follow it with nobody asking. `migrate` does nothing when nothing was
+// renamed, which is every load but the first after such a release.
 Item {
+  id: root
+  readonly property string command: Qt.resolvedUrl("bin/hyprpeach").toString().replace(/^file:\/\//, "")
   Process {
     running: true
-    command: [Qt.resolvedUrl("bin/hyprpeach").toString().replace(/^file:\/\//, ""), "link-command"]
+    command: [root.command, "link-command"]
+  }
+  Process {
+    running: true
+    command: [root.command, "migrate"]
   }
 }

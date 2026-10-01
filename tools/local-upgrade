@@ -2,7 +2,7 @@
 # Puts this checkout on this machine, the way an update would: `npm run local-upgrade`.
 #
 #   npm run local-upgrade             the installed hyprpeach moves to this checkout's HEAD
-#   npm run local-upgrade -- animated-desktops    ...and adds the plugins named
+#   npm run local-upgrade -- animated    ...and adds the plugins named
 #
 # It installs COMMITS, not the working tree -- what gets tested is exactly what
 # would be released -- so uncommitted changes are refused rather than silently
@@ -32,7 +32,7 @@ main() {
   for name in "$@"; do "$PLUGIN/bin/hyprpeach" plugin add "$name"; done
 
   # Every added plugin's own build, brought up to date: a plugin that declares
-  # `prepare` (animated-desktops' renderer) rebuilds when its source moved, and returns at
+  # `prepare` (animated' renderer) rebuilds when its source moved, and returns at
   # once when it did not.
   local manifest script id
   for manifest in "$PLUGIN"/plugins/*/manifest.json; do

@@ -31,6 +31,15 @@ END="-- <<< hyprpeach <<<"
 FIRST_GENERATION_COMMAND_MARKER="# hyprpeach — move this machine between hyprpeach releases."
 # The 1.x library clone. Nothing 2.x installs reads it.
 FIRST_GENERATION_CLONE="$HOME/.config/hypr/hyprpeach"
+# PLUGINS THAT HAVE CHANGED NAME, old then new, oldest first. A machine that
+# had one added still has it under the old name in four places after the
+# update moves the folder: Omarchy's link, the bar's entry and the enabled
+# list in shell.json, and the plugin's own files. `hyprpeach migrate` moves
+# all four. Entries stay here for good: an install can skip releases.
+RENAMED_PLUGINS=(
+  "dev-ports ports"
+  "animated-desktops animated"
+)
 
 # This clone, found from this file rather than assumed: `hyprpeach` on PATH is
 # a link, and readlink -f follows it home.
@@ -69,6 +78,21 @@ available_plugin_names() {
     [[ -f $manifest ]] && basename "$(dirname "$manifest")"
   done
   return 0
+}
+
+# A PLUGIN'S OLD NAME STILL WORKS, said aloud: a script written against an
+# earlier release -- `hyprpeach plugin add dev-ports` -- keeps doing what it
+# did. That, with `migrate`, is what makes a rename no break at all.
+current_plugin_name() {
+  local name=$1 pair old new
+  for pair in "${RENAMED_PLUGINS[@]}"; do
+    read -r old new <<<"$pair"
+    if [[ $name == "$old" ]]; then
+      say "$old is now called $new" >&2
+      name=$new
+    fi
+  done
+  printf '%s\n' "$name"
 }
 
 require_plugin_name() {
@@ -131,17 +155,47 @@ plugin_is_added() {
 # 🍑 a plugin you have, 🌱 one you could, ❔ one in a state `add` will explain.
 command_plugin_list() {
   say "hyprpeach $(manifest_field "$ROOT/manifest.json" version) ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo "not a git checkout"))"
-  local name manifest state mark
+  local name
   while IFS= read -r name; do
-    manifest="$ROOT/plugins/$name/manifest.json"
-    state=$(plugin_state "$name" "$(manifest_field "$manifest" id)")
-    case $state in
-      added) mark="🍑" ;;
-      "not added") mark="🌱" ;;
-      *) mark="❔" ;;
-    esac
-    printf '  %s %-18s %-8s %-10s %s\n' "$mark" "$name" "$(manifest_field "$manifest" version)" "$state" "$(manifest_field "$manifest" name)"
+    if [[ -z $(required_plugin_names "$name" | head -n 1) ]]; then list_plugin_tree "$name" ""; fi
   done < <(available_plugin_names)
+}
+
+# THE LIST IS A TREE OF WHAT NEEDS WHAT: each plugin under the one it
+# requires, read from the same `requires` that `add` and `remove` enforce, so
+# the shape on screen is the rule rather than a picture of it. A plugin that
+# required two would sit under the first.
+#
+# `indent` is what goes before this plugin's branch: two spaces per level, and
+# a bar where a sibling further down still hangs from the level above.
+list_plugin_tree() {
+  local name=$1 indent=$2
+  local manifest="$ROOT/plugins/$name/manifest.json"
+  local state mark
+  state=$(plugin_state "$name" "$(manifest_field "$manifest" id)")
+  case $state in
+    added) mark="🍑" ;;
+    "not added") mark="🌱" ;;
+    *) mark="❔" ;;
+  esac
+  # The name column narrows by the indent, so the columns after it line up
+  # at every depth. ${#indent} counts characters, one column each.
+  printf '  %s%s %-*s %-8s %-10s %s\n' "$indent" "$mark" "$(( 24 - ${#indent} ))" "$name" \
+    "$(manifest_field "$manifest" version)" "$state" "$(manifest_field "$manifest" name)"
+
+  local children=() child
+  while IFS= read -r child; do
+    if [[ $(required_plugin_names "$child" | head -n 1) == "$name" ]]; then children+=("$child"); fi
+  done < <(available_plugin_names)
+  local index branch continuation
+  # This plugin's own branch, as seen from its children: a "├─" above them
+  # becomes "│  " beside them, a "└─" becomes blank.
+  continuation=${indent//├─/│ }
+  continuation=${continuation//└─/  }
+  for index in "${!children[@]}"; do
+    if (( index == ${#children[@]} - 1 )); then branch="└─"; else branch="├─"; fi
+    list_plugin_tree "${children[$index]}" "$continuation$branch "
+  done
 }
 
 # Link plugins/<name> into Omarchy's plugins folder, and enable it.
@@ -161,7 +215,8 @@ command_plugin_list() {
 # Omarchy is written again. For desktops that is the monitors, so adding it
 # again is how a changed monitor layout is picked up.
 command_plugin_add() {
-  local name=$1
+  local name
+  name=$(current_plugin_name "${1:-}")
   require_installed_clone
   require_command omarchy "hyprpeach plugins are Omarchy plugins"
   require_plugin_name "$name"
@@ -236,7 +291,8 @@ command_plugin_add() {
 # `rm -rf` on the link would be the same command one trailing slash away from
 # deleting the folder inside this clone that it points at.
 command_plugin_remove() {
-  local name=$1
+  local name
+  name=$(current_plugin_name "${1:-}")
   require_installed_clone
   require_command omarchy "hyprpeach plugins are Omarchy plugins"
   require_plugin_name "$name"
@@ -419,6 +475,9 @@ command_upgrade() {
   require_installed_clone
   require_command omarchy "hyprpeach is an Omarchy plugin"
   omarchy plugin update "$PLUGIN_ID"
+  # This file is the one from BEFORE the update, already in memory; the
+  # migration it runs is the updated one, from disk.
+  "$ROOT/bin/hyprpeach" migrate
   # Reported, not fatal: the update has already happened, and the rebuilds and
   # the list below are still worth having. Errors here are usually the
   # person's own config meeting a new release, and they need to see them.
@@ -437,8 +496,8 @@ command_upgrade() {
   command_plugin_list
 }
 
-# ANIMATED-DESKTOPS SETTINGS: the scene, and how fast a switch is. The file
-# is ~/.config/hyprpeach/animated-desktops.json; what may go in it, and the
+# ANIMATED SETTINGS: the scene, and how fast a switch is. The file
+# is ~/.config/hyprpeach/animated.json; what may go in it, and the
 # defaults, are in the plugin's settings.schema.json, which the renderer reads
 # too -- so this offers exactly the choices the renderer accepts.
 #
@@ -446,8 +505,8 @@ command_upgrade() {
 # written; the running renderer looks at the file once a second.
 command_setting() {
   local key=$1 value=${2:-}
-  local schema="$ROOT/plugins/animated-desktops/settings.schema.json"
-  local file="${XDG_CONFIG_HOME:-$HOME/.config}/hyprpeach/animated-desktops.json"
+  local schema="$ROOT/plugins/animated/settings.schema.json"
+  local file="${XDG_CONFIG_HOME:-$HOME/.config}/hyprpeach/animated.json"
   local current choice
   # What the renderer is using: the file's value when the schema allows it,
   # otherwise the default -- the renderer falls back the same way.
@@ -471,6 +530,80 @@ command_setting() {
   say "$key: $value"
 }
 
+# A RENAMED PLUGIN, CARRIED OVER: run by hyprpeach's own service every time
+# the shell loads it -- which `omarchy plugin update` makes it do -- and by
+# `hyprpeach upgrade`. So the move happens whichever way the update came, and
+# without anyone knowing to ask for it. Does nothing when there is nothing to
+# move, which is nearly always; safe to run any number of times.
+#
+# Only a link of ours is moved, one pointing into this clone at the old
+# folder. A copy or a link elsewhere is somebody's own, and stays.
+command_migrate() {
+  [[ $ROOT == "$(readlink -f "$PLUGIN_DIRECTORY" 2>/dev/null)" ]] || return 0
+  local pair old new old_link new_link moved=()
+  for pair in "${RENAMED_PLUGINS[@]}"; do
+    read -r old new <<<"$pair"
+    old_link="$PLUGINS_DIRECTORY/$PLUGIN_ID.$old"
+    new_link="$PLUGINS_DIRECTORY/$PLUGIN_ID.$new"
+    [[ -L $old_link && $(readlink "$old_link") == "$PLUGIN_ID/plugins/$old" ]] || continue
+    rm "$old_link"
+    [[ -e $new_link || -L $new_link ]] || ln -s "$PLUGIN_ID/plugins/$new" "$new_link"
+    rename_in_shell_configuration "$PLUGIN_ID.$old" "$PLUGIN_ID.$new"
+    move_plugin_files "$old" "$new"
+    moved+=("$old → $new")
+  done
+  (( ${#moved[@]} )) || return 0
+  # The running shell reads shell.json again and finds the new folders: the
+  # widget comes back where it was, the service under its new name.
+  omarchy-shell shell reloadConfig >/dev/null 2>&1 || true
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  say "renamed: ${moved[*]}"
+}
+
+# The bar entry keeps its section, its place in it, and any settings of its
+# own; the enabled list keeps its place. An entry already under the new id is
+# dropped first -- a leftover from an earlier plugin of that name would
+# otherwise come back to life beside the moved one, two widgets for one.
+# Only where the old id is present: run again, this changes nothing.
+rename_in_shell_configuration() {
+  local old=$1 new=$2
+  local file="$HOME/.config/omarchy/shell.json"
+  [[ -s $file ]] || return 0
+  jq --arg old "$old" --arg new "$new" '
+    def entry_id: if type == "string" then . elif type == "object" then (.id // "") else "" end;
+    def renamed: if type == "string" and . == $old then $new elif type == "object" and .id == $old then .id = $new else . end;
+    def carried: if any(.[]; entry_id == $old) then map(select(entry_id != $new)) | map(renamed) else . end;
+    ([(.bar.layout // {})[] | select(type == "array") | .[] | entry_id] | any(. == $old)) as $on_bar
+    | if $on_bar then .bar.layout |= map_values(if type == "array" then map(select(entry_id != $new)) | map(renamed) else . end) else . end
+    | if (.plugins | type) == "array" then .plugins |= carried else . end
+  ' "$file" > "$file.tmp" && mv "$file.tmp" "$file" || rm -f "$file.tmp"
+}
+
+# A plugin's own files go by its name: its program under ~/.local/share, its
+# build under ~/.cache, its settings under ~/.config. Moved, not rebuilt or
+# reset: a build carried over only recompiles what changed, and settings are
+# somebody's choices. Never over something already at the new name.
+move_plugin_files() {
+  local old=$1 new=$2
+  local configuration="${XDG_CONFIG_HOME:-$HOME/.config}/hyprpeach"
+  local pair from to
+  for pair in \
+    "$HOME/.local/share/hyprpeach/$old|$HOME/.local/share/hyprpeach/$new" \
+    "$HOME/.cache/hyprpeach/$old-target|$HOME/.cache/hyprpeach/$new-target" \
+    "$configuration/$old.json|$configuration/$new.json"; do
+    from=${pair%%|*}
+    to=${pair#*|}
+    if [[ -e $from && ! -e $to ]]; then mv "$from" "$to"; fi
+  done
+  # The settings name their schema by path, which moved with the folder.
+  local settings="$configuration/$new.json"
+  if [[ -s $settings ]] && jq -e 'has("$schema")' "$settings" >/dev/null 2>&1; then
+    jq --arg schema "$ROOT/plugins/$new/settings.schema.json" '."$schema" = $schema' "$settings" > "$settings.tmp" \
+      && mv "$settings.tmp" "$settings" || rm -f "$settings.tmp"
+  fi
+  return 0
+}
+
 command_help() {
   cat <<'USAGE'
 🍑 hyprpeach — Omarchy plugins for Hyprland on more than one monitor
@@ -483,6 +616,7 @@ command_help() {
   hyprpeach speed [speed]         animated desktops: calm, quick or snappy switches
   hyprpeach version               the same as plugin list
   hyprpeach link-command          put `hyprpeach` on PATH (the plugin does this itself)
+  hyprpeach migrate               carry a renamed plugin over (the plugin does this itself)
   hyprpeach help                  this
 
   Adding desktops again re-reads your monitors.
@@ -500,6 +634,7 @@ main() {
       esac
       ;;
     upgrade) command_upgrade ;;
+    migrate) command_migrate ;;
     scene) command_setting scene "${2:-}" ;;
     speed) command_setting speed "${2:-}" ;;
     version) command_plugin_list ;;

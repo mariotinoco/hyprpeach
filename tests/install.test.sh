@@ -97,14 +97,25 @@ case "${1:-}" in
   configerrors) echo "" ;;
 esac
 FAKE
-# animated-desktops' prepare builds with cargo. The fake makes the file cargo would make,
-# so the rest of the step runs for real: the stamp, the install, the skip when
-# nothing changed.
+# animated' prepare builds with cargo, run through mise for the Rust its
+# mise.toml pins. The cargo fake makes the file cargo would make, so the rest
+# of the step runs for real: the stamp, the install, the skip when nothing
+# changed. The mise fake trusts and installs nothing, and runs what `exec` is
+# given -- the real one would fetch a toolchain.
 cat > "$FAKES/cargo" <<'FAKE'
 #!/usr/bin/env bash
 printf 'cargo %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
 while (( $# )); do [[ $1 == --target-dir ]] && target=$2; shift; done
-mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-animated-desktops" && chmod +x "$target/release/hyprpeach-animated-desktops"
+mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-animated" && chmod +x "$target/release/hyprpeach-animated"
+FAKE
+cat > "$FAKES/mise" <<'FAKE'
+#!/usr/bin/env bash
+printf 'mise %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
+[[ ${1:-} == -C ]] && shift 2
+case "${1:-}" in
+  exec) shift; [[ ${1:-} == -- ]] && shift; exec "$@" ;;
+  *) exit 0 ;;
+esac
 FAKE
 chmod +x "$FAKES"/*
 
@@ -124,7 +135,7 @@ use_home() {
 }
 
 use_home guard
-for name in omarchy omarchy-shell hyprctl cargo; do
+for name in omarchy omarchy-shell hyprctl cargo mise; do
   [[ $(command -v "$name") == "$FAKES/$name" ]] || { echo "REFUSING TO RUN: $name resolves to $(command -v "$name"), not the fake"; exit 1; }
 done
 [[ $HOME == "$SANDBOX"/* ]] || { echo "REFUSING TO RUN: HOME is $HOME"; exit 1; }
@@ -169,7 +180,7 @@ use_home first-generation
 # the whole repository cloned as the bar strip's plugin, hyprpeach.desktops.
 # That clone is in the state the machine this was written on was really found
 # in -- a commit the remote never had, an origin that no longer exists -- with
-# a dev-ports link into it from a pre-release 2.
+# a ports link into it from a pre-release 2.
 git clone --quiet "$UPSTREAM" "$HOME/.config/hypr/hyprpeach"
 git_quietly -C "$HOME/.config/hypr/hyprpeach" checkout --quiet --detach v1.3.0
 git -C "$UPSTREAM" show v1.3.0:bin/hyprpeach > "$HOME/.local/bin/hyprpeach"
@@ -196,7 +207,7 @@ git_quietly -C "$SANDBOX/vanished" commit --quiet --allow-empty -m "a commit the
 mkdir -p "$(plugins_directory)"
 git clone --quiet "$SANDBOX/vanished" "$(plugins_directory)/hyprpeach.desktops"
 rm -rf "$SANDBOX/vanished"
-ln -s hyprpeach.desktops/plugins/dev-ports "$(plugins_directory)/hyprpeach.dev-ports"
+ln -s hyprpeach.desktops/plugins/ports "$(plugins_directory)/hyprpeach.ports"
 : > "$LOG"
 
 HYPRPEACH_REPOSITORY="$UPSTREAM" hyprpeach upgrade > "$SANDBOX/upgrade.out" 2>&1
@@ -223,9 +234,9 @@ check "the bar goes to the left" "$(called 'omarchy bar position left')" "1"
 check "Hyprland is reloaded" "$(called 'hyprctl reload')" "1"
 grep -qF "rm -rf $HOME/.config/hypr/hyprpeach" "$SANDBOX/upgrade.out"
 check "it says the 1.x clone can go, and does not remove it" "$?$([[ -d $HOME/.config/hypr/hyprpeach ]] && echo kept)" "0kept"
-check "a plugin linked into the retired clone is listed as broken" "$(listed ❔ dev-ports 'a broken link')" "yes"
-hyprpeach plugin add dev-ports >/dev/null 2>&1
-check "and adding it again repairs it" "$(link_of hyprpeach.dev-ports)" "hyprpeach/plugins/dev-ports"
+check "a plugin linked into the retired clone is listed as broken" "$(listed ❔ ports 'a broken link')" "yes"
+hyprpeach plugin add ports >/dev/null 2>&1
+check "and adding it again repairs it" "$(link_of hyprpeach.ports)" "hyprpeach/plugins/ports"
 
 echo
 echo "adding desktops again re-reads the monitors and changes nothing else"
@@ -266,21 +277,21 @@ omarchy plugin enable hyprpeach >/dev/null
 "$PLUGIN/bin/hyprpeach" link-command >/dev/null 2>&1
 check "the service puts hyprpeach on PATH" "$(readlink -f "$HOME/.local/bin/hyprpeach")" "$(readlink -f "$PLUGIN")/bin/hyprpeach"
 check "desktops is not added" "$(listed 🌱 desktops 'not added')" "yes"
-check "dev-ports is not added" "$(listed 🌱 dev-ports 'not added')" "yes"
+check "ports is not added" "$(listed 🌱 ports 'not added')" "yes"
 check "and Hyprland's config is untouched" "$(blocks)" "0"
 
 echo
 echo "plugins come and go at will: 0, 1, 2, 1, 0, 1"
 : > "$LOG"
-hyprpeach plugin add dev-ports >/dev/null 2>&1
-check "dev-ports alone is added" "$(link_of hyprpeach.dev-ports)" "hyprpeach/plugins/dev-ports"
-check "it is enabled in its manifest's own section" "$(called 'omarchy plugin enable hyprpeach.dev-ports')" "1"
+hyprpeach plugin add ports >/dev/null 2>&1
+check "ports alone is added" "$(link_of hyprpeach.ports)" "hyprpeach/plugins/ports"
+check "it is enabled in its manifest's own section" "$(called 'omarchy plugin enable hyprpeach.ports')" "1"
 check "the shell is asked to rescan" "$(called 'omarchy-shell shell rescanPlugins')" "1"
-omarchy-plugin-catalog | jq -e 'any(.[]; .id == "hyprpeach.dev-ports")' >/dev/null
+omarchy-plugin-catalog | jq -e 'any(.[]; .id == "hyprpeach.ports")' >/dev/null
 check "Omarchy's own catalog finds it through the link" "$?" "0"
 check "and Hyprland's config is still untouched" "$(blocks)" "0"
-hyprpeach plugin add dev-ports >/dev/null 2>&1
-check "adding it again does not enable it a second time" "$(called 'omarchy plugin enable hyprpeach.dev-ports')" "1"
+hyprpeach plugin add ports >/dev/null 2>&1
+check "adding it again does not enable it a second time" "$(called 'omarchy plugin enable hyprpeach.ports')" "1"
 hyprpeach plugin add desktops >/dev/null 2>&1
 check "desktops is added beside it" "$(listed 🍑 desktops added)" "yes"
 check "and writes exactly one block" "$(blocks)" "1"
@@ -291,10 +302,10 @@ grep -q "the user own config" "$HOME/.config/hypr/hyprland.lua"
 check "and the rest of hyprland.lua is still there" "$?" "0"
 check "Omarchy's workspaces widget is put back" "$(called 'omarchy plugin enable omarchy.workspaces')" "1"
 check "and its menu, where Omarchy ships it" "$(called 'omarchy plugin enable omarchy.menu --section left')" "1"
-check "dev-ports stays added" "$(listed 🍑 dev-ports added)" "yes"
+check "ports stays added" "$(listed 🍑 ports added)" "yes"
 check "the plugin inside the clone is untouched" "$([[ -f $PLUGIN/plugins/desktops/Desktops.qml ]] && echo there || echo gone)" "there"
-hyprpeach plugin remove dev-ports >/dev/null 2>&1
-check "with both removed, neither is listed as added" "$(listed 🌱 desktops 'not added')$(listed 🌱 dev-ports 'not added')" "yesyes"
+hyprpeach plugin remove ports >/dev/null 2>&1
+check "with both removed, neither is listed as added" "$(listed 🌱 desktops 'not added')$(listed 🌱 ports 'not added')" "yesyes"
 check "and the clone is still clean" "$(git -C "$PLUGIN" status --porcelain | wc -l)" "0"
 hyprpeach plugin add desktops >/dev/null 2>&1
 check "desktops comes back" "$(link_of hyprpeach.desktops)$(blocks)" "hyprpeach/plugins/desktops1"
@@ -332,6 +343,13 @@ check "desktops cannot be removed out from under it" "$?" "1"
 grep -q "hyprpeach plugin remove overview" "$SANDBOX/requires.out"
 check "and the refusal says what to remove first" "$?" "0"
 check "desktops is still added" "$(link_of hyprpeach.desktops)$(blocks)" "hyprpeach/plugins/desktops1"
+
+echo
+echo "the list is a tree of what needs what"
+check "animated sits under desktops" "$(hyprpeach plugin list | grep -c '^  ├─ 🌱 animated ')" "1"
+check "  ...and overview, its last, closes the branch" "$(hyprpeach plugin list | grep -c '^  └─ 🍑 overview ')" "1"
+check "ports, needing nothing, is at the top level" "$(hyprpeach plugin list | grep -c '^  🌱 ports ')" "1"
+
 hyprpeach plugin remove overview >/dev/null 2>&1
 check "overview comes off on its own" "$([[ -L $(plugins_directory)/hyprpeach.overview ]] && echo linked || echo none)" "none"
 
@@ -339,30 +357,31 @@ echo
 echo "a plugin that builds is prepared before it is linked, and only when stale"
 : > "$LOG"
 # What an earlier build left: the planet scene's NASA imagery.
-mkdir -p "$HOME/.local/share/hyprpeach/animated-desktops/assets" && echo map > "$HOME/.local/share/hyprpeach/animated-desktops/assets/day.jpg"
-hyprpeach plugin add animated-desktops > "$SANDBOX/animated-desktops.out" 2>&1
-check "adding animated-desktops succeeds" "$?" "0"
-check "it is linked" "$(link_of hyprpeach.animated-desktops)" "hyprpeach/plugins/animated-desktops"
+mkdir -p "$HOME/.local/share/hyprpeach/animated/assets" && echo map > "$HOME/.local/share/hyprpeach/animated/assets/day.jpg"
+hyprpeach plugin add animated > "$SANDBOX/animated.out" 2>&1
+check "adding animated succeeds" "$?" "0"
+check "it is linked" "$(link_of hyprpeach.animated)" "hyprpeach/plugins/animated"
 check "its renderer was built once" "$(grep -c '^cargo build' "$LOG")" "1"
-check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-desktops ]] && echo yes)" "yes"
-check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/animated-desktops/assets ]] && echo left || echo gone)" "gone"
+check "  ...with the Rust its mise.toml pins, not whatever is on PATH" "$(grep -c '^mise -C .*/plugins/animated/renderer exec -- cargo build' "$LOG")" "1"
+check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/animated/hyprpeach-animated ]] && echo yes)" "yes"
+check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/animated/assets ]] && echo left || echo gone)" "gone"
 : > "$LOG"
-"$PLUGIN/plugins/animated-desktops/prepare" --if-stale
+"$PLUGIN/plugins/animated/prepare" --if-stale
 check "starting again with nothing changed builds nothing" "$(grep -c '^cargo' "$LOG")" "0"
-echo "// changed" >> "$SANDBOX/work/plugins/animated-desktops/renderer/src/main.rs"
+echo "// changed" >> "$SANDBOX/work/plugins/animated/renderer/src/main.rs"
 git_quietly -C "$SANDBOX/work" commit --quiet -am "the renderer changed"
 git -C "$SANDBOX/work" push --quiet "$UPSTREAM" "HEAD:$(git -C "$UPSTREAM" symbolic-ref --short HEAD)"
 omarchy plugin update hyprpeach --yes >/dev/null 2>&1
-"$PLUGIN/plugins/animated-desktops/prepare" --if-stale >/dev/null 2>&1
+"$PLUGIN/plugins/animated/prepare" --if-stale >/dev/null 2>&1
 check "after an update changes the renderer, it is rebuilt" "$(grep -c '^cargo build' "$LOG")" "1"
 
 echo
-echo "animated-desktops settings are the schema's choices, written to one file"
-SETTINGS="$HOME/.config/hyprpeach/animated-desktops.json"
+echo "animated settings are the schema's choices, written to one file"
+SETTINGS="$HOME/.config/hyprpeach/animated.json"
 check "with no file, the default speed is in effect" "$(hyprpeach speed | grep -c 'quick  (in effect)')" "1"
 hyprpeach speed snappy >/dev/null 2>&1
 check "a speed is written to the settings file" "$(jq -r .speed "$SETTINGS")" "snappy"
-check "  ...pointing an editor at its schema" "$(jq -r '."$schema"' "$SETTINGS")" "$PLUGIN/plugins/animated-desktops/settings.schema.json"
+check "  ...pointing an editor at its schema" "$(jq -r '."$schema"' "$SETTINGS")" "$PLUGIN/plugins/animated/settings.schema.json"
 hyprpeach speed warp > "$SANDBOX/speed.out" 2>&1
 check "a speed the schema does not offer is refused" "$?" "1"
 check "  ...and the file is left as it was" "$(jq -r .speed "$SETTINGS")" "snappy"
@@ -372,22 +391,70 @@ check "the scene list marks the one in effect" "$(hyprpeach scene | grep -c 'neb
 jq '.scene = "planet"' "$SETTINGS" > "$SETTINGS.edited" && mv "$SETTINGS.edited" "$SETTINGS"
 check "a scene that no longer exists shows the default in effect, as the renderer uses" "$(hyprpeach scene | grep -c 'synthwave  (in effect)')" "1"
 
-hyprpeach plugin remove animated-desktops >/dev/null 2>&1
-check "animated-desktops comes off" "$([[ -L $(plugins_directory)/hyprpeach.animated-desktops ]] && echo linked || echo none)" "none"
+hyprpeach plugin remove animated >/dev/null 2>&1
+check "animated comes off" "$([[ -L $(plugins_directory)/hyprpeach.animated ]] && echo linked || echo none)" "none"
+
+echo
+echo "a plugin that changed name is carried over: link, bar place, files and settings"
+# A 3.0.0 machine just after the update moved the folders: dev-ports and
+# animated-desktops added under those names, their links now pointing at
+# folders that are gone, the bar and the enabled list still naming them --
+# and, as on the machine this was written on, a stale hyprpeach.ports left on
+# the bar by an earlier plugin of that name.
+P=$(plugins_directory)
+ln -s hyprpeach/plugins/dev-ports "$P/hyprpeach.dev-ports"
+ln -s hyprpeach/plugins/animated-desktops "$P/hyprpeach.animated-desktops"
+SHELL_CONFIGURATION="$HOME/.config/omarchy/shell.json"
+cat > "$SHELL_CONFIGURATION" <<'JSON'
+{"bar":{"layout":{"left":[{"id":"hyprpeach.desktops"}],"right":[{"id":"omarchy.tray"},{"id":"hyprpeach.dev-ports","note":"kept"},{"id":"hyprpeach.ports"},{"id":"omarchy.audio"}]}},"plugins":[{"id":"hyprpeach"},{"id":"hyprpeach.animated-desktops"}]}
+JSON
+# Nothing under the new names yet, as on a machine that never ran 3.0.1.
+rm -rf "${HOME:?}/.local/share/hyprpeach/animated" "${HOME:?}/.cache/hyprpeach/animated-target" "${HOME:?}/.config/hyprpeach/animated.json"
+mkdir -p "$HOME/.local/share/hyprpeach/animated-desktops" "$HOME/.cache/hyprpeach/animated-desktops-target" "$HOME/.config/hyprpeach"
+echo built > "$HOME/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-desktops"
+echo compiled > "$HOME/.cache/hyprpeach/animated-desktops-target/marker"
+echo '{"$schema":"/old/plugins/animated-desktops/settings.schema.json","scene":"nebula","speed":"snappy"}' > "$HOME/.config/hyprpeach/animated-desktops.json"
+: > "$LOG"
+hyprpeach migrate > "$SANDBOX/migrate.out" 2>&1
+check "the migration succeeds" "$?" "0"
+check "ports is linked under its new name" "$(link_of hyprpeach.ports)" "hyprpeach/plugins/ports"
+check "  ...and animated" "$(link_of hyprpeach.animated)" "hyprpeach/plugins/animated"
+check "the old links are gone" "$(ls -a "$P" | grep -c 'dev-ports\|animated-desktops')" "0"
+check "the widget keeps its place on the bar, with its settings" "$(jq -c '[.bar.layout.right[] | .id]' "$SHELL_CONFIGURATION") $(jq -r '.bar.layout.right[1].note' "$SHELL_CONFIGURATION")" '["omarchy.tray","hyprpeach.ports","omarchy.audio"] kept'
+check "  ...and the stale entry of that name does not come back beside it" "$(jq '[.bar.layout[][] | select(.id == "hyprpeach.ports")] | length' "$SHELL_CONFIGURATION")" "1"
+check "the service stays enabled, under its new name" "$(jq -c '[.plugins[].id]' "$SHELL_CONFIGURATION")" '["hyprpeach","hyprpeach.animated"]'
+check "its build moves with it" "$(cat "$HOME/.local/share/hyprpeach/animated/hyprpeach-animated-desktops") $(cat "$HOME/.cache/hyprpeach/animated-target/marker")" "built compiled"
+check "the settings are kept, pointing at the schema where it now is" "$(jq -r '[.scene, .speed, ."$schema"] | join(" ")' "$HOME/.config/hyprpeach/animated.json")" "nebula snappy $PLUGIN/plugins/animated/settings.schema.json"
+check "the shell is told to read it all again" "$(called 'omarchy-shell shell reloadConfig')$(called 'omarchy-shell shell rescanPlugins')" "11"
+cp "$SHELL_CONFIGURATION" "$SANDBOX/shell.after"
+: > "$LOG"
+hyprpeach migrate > "$SANDBOX/migrate.out" 2>&1
+check "run again, it changes nothing" "$(cmp -s "$SHELL_CONFIGURATION" "$SANDBOX/shell.after" && echo same)$(grep -c . "$LOG")" "same0"
+rm "$P/hyprpeach.ports"
+mkdir "$P/hyprpeach.dev-ports" && echo '{}' > "$P/hyprpeach.dev-ports/manifest.json"
+hyprpeach migrate >/dev/null 2>&1
+check "a folder somebody put under the old name is theirs, and left" "$([[ -d $P/hyprpeach.dev-ports && ! -e $P/hyprpeach.ports ]] && echo left)" "left"
+rm -rf "${P:?}/hyprpeach.dev-ports"
+hyprpeach plugin remove animated >/dev/null 2>&1
+hyprpeach plugin add dev-ports > "$SANDBOX/old-name.out" 2>&1
+check "a script still adding a plugin by its old name works" "$?$(link_of hyprpeach.ports)" "0hyprpeach/plugins/ports"
+check "  ...and is told the new one" "$(grep -c 'dev-ports is now called ports' "$SANDBOX/old-name.out")" "1"
+hyprpeach plugin remove dev-ports >/dev/null 2>&1
+check "  ...and removing it by that name works too" "$([[ -L $P/hyprpeach.ports ]] && echo linked || echo none)" "none"
 
 echo
 echo "one Omarchy update moves the plugins with it"
 # Nothing of a plugin's is fetched or copied: the collection moves, and the link
 # already points at where it moved.
-hyprpeach plugin add dev-ports >/dev/null 2>&1
+hyprpeach plugin add ports >/dev/null 2>&1
 BRANCH=$(git -C "$UPSTREAM" symbolic-ref --short HEAD)
-jq '.version = "9.9.9"' "$SANDBOX/work/plugins/dev-ports/manifest.json" > "$SANDBOX/manifest.json"
-mv "$SANDBOX/manifest.json" "$SANDBOX/work/plugins/dev-ports/manifest.json"
-git_quietly -C "$SANDBOX/work" commit --quiet -am "dev-ports 9.9.9"
+jq '.version = "9.9.9"' "$SANDBOX/work/plugins/ports/manifest.json" > "$SANDBOX/manifest.json"
+mv "$SANDBOX/manifest.json" "$SANDBOX/work/plugins/ports/manifest.json"
+git_quietly -C "$SANDBOX/work" commit --quiet -am "ports 9.9.9"
 git -C "$SANDBOX/work" push --quiet "$UPSTREAM" "HEAD:$BRANCH"
 omarchy plugin update hyprpeach --yes >/dev/null 2>&1
 check "Omarchy's update succeeds, and validates the clone with plugins inside it" "$?" "0"
-check "the added plugin is the new version" "$(jq -r .version "$(plugins_directory)/hyprpeach.dev-ports/manifest.json")" "9.9.9"
+check "the added plugin is the new version" "$(jq -r .version "$(plugins_directory)/hyprpeach.ports/manifest.json")" "9.9.9"
 
 echo
 echo "install.sh re-points a clone whose origin is somewhere stale"
@@ -415,24 +482,24 @@ HYPRPEACH_REPOSITORY="$UPSTREAM" bash "$REPOSITORY_ROOT/install.sh" >/dev/null 2
 check "install.sh succeeds" "$?" "0"
 check "hyprpeach was removed and added again through Omarchy" "$(called 'omarchy plugin remove hyprpeach --yes')$(called "omarchy plugin add $UPSTREAM --yes")" "11"
 check "and is on the repository's newest commit" "$(git -C "$PLUGIN" rev-parse HEAD)" "$(git -C "$UPSTREAM" rev-parse HEAD)"
-check "the plugins linked into it resolve again" "$(jq -r .id "$(plugins_directory)/hyprpeach.dev-ports/manifest.json")" "hyprpeach.dev-ports"
+check "the plugins linked into it resolve again" "$(jq -r .id "$(plugins_directory)/hyprpeach.ports/manifest.json")" "hyprpeach.ports"
 
 echo
 echo "a copied plugin folder is replaced by the link, and kept"
-rm "$(plugins_directory)/hyprpeach.dev-ports"
-cp -r "$PLUGIN/plugins/dev-ports" "$(plugins_directory)/hyprpeach.dev-ports"
-hyprpeach plugin add dev-ports >/dev/null 2>&1
+rm "$(plugins_directory)/hyprpeach.ports"
+cp -r "$PLUGIN/plugins/ports" "$(plugins_directory)/hyprpeach.ports"
+hyprpeach plugin add ports >/dev/null 2>&1
 check "adding over a copy succeeds" "$?" "0"
-check "the copy became the link" "$(link_of hyprpeach.dev-ports)" "hyprpeach/plugins/dev-ports"
-check "the copy is backed up, hidden from the shell's scan" "$(find "$(plugins_directory)" -maxdepth 1 -name '.hyprpeach.dev-ports.bak.*' | wc -l)" "1"
+check "the copy became the link" "$(link_of hyprpeach.ports)" "hyprpeach/plugins/ports"
+check "the copy is backed up, hidden from the shell's scan" "$(find "$(plugins_directory)" -maxdepth 1 -name '.hyprpeach.ports.bak.*' | wc -l)" "1"
 
 echo
 echo "refusals"
 hyprpeach plugin add nonexistent > "$SANDBOX/refusal.out" 2>&1
 check "an unknown plugin is refused" "$?" "1"
-grep -q "dev-ports" "$SANDBOX/refusal.out"
+grep -q "ports" "$SANDBOX/refusal.out"
 check "and the refusal names the ones there are" "$?" "0"
-"$REPOSITORY_ROOT/bin/hyprpeach" plugin add dev-ports > "$SANDBOX/refusal.out" 2>&1
+"$REPOSITORY_ROOT/bin/hyprpeach" plugin add ports > "$SANDBOX/refusal.out" 2>&1
 check "a checkout that is not the installed plugin is refused" "$?" "1"
 grep -q "installed at" "$SANDBOX/refusal.out"
 check "and says where the installed one is" "$?" "0"

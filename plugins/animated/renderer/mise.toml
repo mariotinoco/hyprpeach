@@ -1,0 +1,11 @@
+# The Rust that builds the animated renderer. `prepare` has mise -- which
+# Omarchy installs on every machine -- fetch this exact toolchain into its own
+# directory the first time, so adding the plugin needs no Rust of your own,
+# and every machine builds with the Rust this was tested on. A Rust already
+# installed is left alone either way.
+#
+# TOML, not JSON: mise defines this file's format (ADR-0001's exception for a
+# third-party tool's own contract). Bump the version here, and the next start
+# rebuilds with it -- the file is part of the build stamp.
+[tools]
+rust = "1.98.1"

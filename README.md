@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v3.0.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v3.0.1 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.0.0`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.0.1`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -163,26 +163,26 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 3.0.0
-  🌱 animated-desktops  0.1.0    not added  Animated Desktops
-  🍑 desktops           3.0.0    added      Multi-Monitor Desktops
-  🌱 dev-ports          0.1.0    not added  Local Ports
-  🌱 overview           0.2.0    not added  Desktop Overview
+🍑 hyprpeach 3.0.1
+  🍑 desktops                 3.0.1    added      Multi-Monitor Desktops
+  ├─ 🌱 animated              0.1.0    not added  Animated Desktops
+  └─ 🌱 overview              0.2.1    not added  Desktop Overview
+  🌱 ports                    0.1.0    not added  Local Ports
 
-$ hyprpeach plugin add dev-ports
+$ hyprpeach plugin add ports
 $ hyprpeach plugin remove desktops
 ```
 
 | Plugin | |
 |---|---|
 | [**desktops**](#how-it-works) — Multi-Monitor Desktops | A desktop that spans every monitor and turns as one: the library, [the bar strip](#the-bar-strip), and the overlay. Two monitors, three, one [held](#holding-a-panel) while the rest move. |
-| [**animated-desktops**](plugins/animated-desktops/README.md) — Animated Desktops | A living scene behind your desktops — synthwave or a nebula — with a different place for each desktop, one picture across your monitors, and every switch a flight to the next. Needs desktops. |
+| [**animated**](plugins/animated/README.md) — Animated Desktops | A living scene behind your desktops — synthwave or a nebula — with a different place for each desktop, one picture across your monitors, and every switch a flight to the next. Needs desktops. |
 | [**overview**](plugins/overview/README.md) — Desktop Overview | `SUPER + 0` or `SUPER + TAB` shows every desktop at once, a 3 × 3 on every monitor, live — a video playing on another desktop keeps playing in its cell. Pick one and the whole desk turns. Needs desktops. |
-| [**dev-ports**](plugins/dev-ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
+| [**ports**](plugins/ports/README.md) — Local Ports | An anchor on the bar that grows a red dot while a dev server is listening. One port per line, grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it. |
 
 **They update with hyprpeach.** `add` links the plugin's folder inside hyprpeach's clone into Omarchy's plugins folder, rather than copying it out, so the one `omarchy plugin update` that moves hyprpeach moves every plugin you added from it. There is nothing else to keep current, and nothing that can fall behind.
 
-Each has its own version and its own release notes — `dev-ports-v0.1.0` beside hyprpeach's `v3.0.0` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
+Each has its own version and its own release notes — `ports-v0.1.0` beside hyprpeach's `v3.0.1` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
 
 It is done this way because Omarchy installs one plugin per repository and reads one bar widget per plugin: separate widgets need separate plugin folders, and a repository per widget would split one project across several.
 
@@ -190,7 +190,7 @@ To take hyprpeach off entirely, remove what you added, then hyprpeach itself:
 
 ```bash
 hyprpeach plugin remove desktops
-hyprpeach plugin remove dev-ports
+hyprpeach plugin remove ports
 omarchy plugin remove hyprpeach
 ```
 
@@ -210,16 +210,18 @@ That is Omarchy's own `omarchy plugin update hyprpeach`, followed by a Hyprland 
 
 Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main` as a release, so that is the newest release — plus, at most, documentation written since.
 
+**A plugin that changes name comes along by itself.** The first time the shell loads the new release, hyprpeach moves the plugin to its new name — its place on the bar, its settings, its files — so there is nothing to remove or re-add. Its old name keeps working too: `hyprpeach plugin add dev-ports` adds ports and says so. `hyprpeach migrate` does the move by hand, and does nothing when there is nothing to move.
+
 ### Pinning a release
 
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.1
 hyprctl reload
 ```
 
-That pins the whole collection: a hyprpeach release fixes the version of every plugin in it, and there is no mixing `desktops` from one release with `dev-ports` from another.
+That pins the whole collection: a hyprpeach release fixes the version of every plugin in it, and there is no mixing `desktops` from one release with `ports` from another.
 
 **`omarchy plugin update` undoes a pin.** A detached checkout still fast-forwards, and a bare `omarchy plugin update` updates every git plugin you have. So for installs described as code, make the pin the last step, every time it runs:
 
@@ -227,16 +229,16 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.0
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.0.1
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
-~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add dev-ports
+~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add ports
 ```
 
 Every line is safe to run again. What a version promises:
 
 | Version | Moves when |
 |---|---|
-| **hyprpeach** `vX.Y.Z` | **Major**: a plugin is removed, renamed or has a major release, or how hyprpeach installs changes. **Minor**: a plugin is added or has a minor release. **Patch**: anything else. |
+| **hyprpeach** `vX.Y.Z` | **Major**: something you have stops working or needs you to act — a plugin is removed or has a major release, or how hyprpeach installs changes. **Minor**: a plugin is added or has a minor release. **Patch**: anything else — including a plugin that changes name, because the update carries it over and the old name keeps working. |
 | **a plugin** `<name>-vX.Y.Z` | Semantic versioning against what that plugin does for you. For desktops: a changed chord, `peach.*` signature or `setup()` option is major. |
 
 Tags are never moved once published, so a pin means the same code for as long as it exists.
@@ -253,11 +255,11 @@ hyprpeach upgrade
 
 The 1.x command fetches 2.0.0 and runs its `install.sh`, which is now only a bridge: it retires the 1.x bar strip clone, installs hyprpeach through Omarchy, and adds desktops from it. That rewrites the hyprpeach block in `hyprland.lua` to load the library from the plugin, and replaces the copied `hyprpeach` command with a link that follows every update. Everything you had, you still have.
 
-Then add whatever else you want — the new one in 2.0.0 is dev-ports:
+Then add whatever else you want — the new one in 2.0.0 is ports:
 
 ```bash
 hyprpeach plugin list
-hyprpeach plugin add dev-ports
+hyprpeach plugin add ports
 ```
 
 One thing is left for you, because it may not only be hyprpeach's: the 1.x library clone. Once nothing of your own requires it,

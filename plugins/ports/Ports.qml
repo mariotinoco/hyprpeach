@@ -17,8 +17,8 @@ import "Model.js" as Model
 // quattro). First-party plugins may carry sibling `*.manifest.json` files
 // because their scan runs `find -mindepth 2 -maxdepth 3`; a user plugin's scan
 // does not. So a repository that wants two bar widgets ships two plugin
-// directories: this one lives at plugins/dev-ports inside the hyprpeach clone, and
-// `hyprpeach plugin add dev-ports` links it into Omarchy's plugins folder.
+// directories: this one lives at plugins/ports inside the hyprpeach clone, and
+// `hyprpeach plugin add ports` links it into Omarchy's plugins folder.
 //
 // Folding it into the desktops widget instead is worse than it looks. That
 // widget's geometry exists to make its FIRST tile meet the edge of a tiled
@@ -30,8 +30,8 @@ import "Model.js" as Model
 // WHAT IT READS, AND WHY THAT IS A SUBPROCESS: see listening-ports, beside this file.
 Panel {
   id: root
-  moduleName: "hyprpeach.dev-ports"
-  ipcTarget: "hyprpeach.dev-ports"
+  moduleName: "hyprpeach.ports"
+  ipcTarget: "hyprpeach.ports"
   manageIpc: false
 
   // THE MODEL AND THE LAST ERROR ARE KEPT SEPARATELY, AND A FAILURE KEEPS THE

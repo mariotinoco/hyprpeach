@@ -56,13 +56,13 @@ It ships inside hyprpeach, which is one plugin in Omarchy's registry, and is
 added from there:
 
 ```bash
-hyprpeach plugin add dev-ports
+hyprpeach plugin add ports
 ```
 
-That links this folder into `~/.config/omarchy/plugins/hyprpeach.dev-ports` and
+That links this folder into `~/.config/omarchy/plugins/hyprpeach.ports` and
 places it in the right-hand bar section. It is a link rather than a copy, so
 `omarchy plugin update` on hyprpeach updates this with it. Take it off with
-`hyprpeach plugin remove dev-ports`.
+`hyprpeach plugin remove ports`.
 
 It is a plugin of its own rather than a second widget because Omarchy reads
 exactly one `entryPoints.barWidget` out of each manifest and finds third-party

@@ -34,9 +34,13 @@ No `Co-Authored-By` trailers, and no other AI attribution. The author is the aut
 
 ## Releases
 
-hyprpeach's own version is the collection's: removing or renaming a plugin, a
-plugin's major release, or changing how hyprpeach installs is major; adding a plugin
-or a plugin's minor release is minor; everything else is a patch. It lives in `manifest.json` and the
+hyprpeach's own version is the collection's, and it is about what a person has to
+do: removing a plugin, a plugin's major release, or changing how hyprpeach installs
+is major; adding a plugin or a plugin's minor release is minor; everything else is a
+patch. A rename is a patch ONLY because the upgrade carries it: list it in
+`RENAMED_PLUGINS` in `bin/hyprpeach` -- `migrate` moves the link, bar place, enabled
+entry and files, and the old name keeps working in `plugin add` -- and never take an
+entry out, because an install can skip releases. It lives in `manifest.json` and the
 version-pinned commands in `README.md` — they move together or the release lies about
 itself. The README's table of what a version promises is the contract; keep it true.
 
@@ -48,7 +52,7 @@ not. Code lands on `main` together with its release; documentation may follow al
 against its own surface — for desktops, the `peach.*` functions, `setup()` options and
 the keymap. It ships when hyprpeach ships, because Omarchy installs the
 whole repository at `main`; its version says what changed in *it*. A commit that
-releases one says so on the subject line — `feat(dev-ports-0.2.0): …` — and a commit that
+releases one says so on the subject line — `feat(ports-0.2.0): …` — and a commit that
 releases both carries hyprpeach's.
 
 Tag annotated: `vX.Y.Z` for hyprpeach, `<name>-vX.Y.Z` for a plugin. Only hyprpeach's
@@ -76,9 +80,9 @@ way an update would, and the change is checked there first.
 
 `lua tests/hyprpeach.test.lua` — no compositor, a stubbed `hl`.
 `bash tests/install.test.sh` — the install, the 1.x upgrade, and `hyprpeach plugin`.
-`bash tests/dev-ports.test.sh` — the dev-ports reader and its model, against a fake `ss`.
+`bash tests/ports.test.sh` — the ports reader and its model, against a fake `ss`.
 `bash tests/overview.test.sh` — the overview's model: desktops, windows, grid.
-`cargo test --manifest-path plugins/animated-desktops/renderer/Cargo.toml` — the animated desktops: every switch the same step forward, nothing longer than four, and where each monitor looks from.
+`cargo test --manifest-path plugins/animated/renderer/Cargo.toml` — the animated desktops: every switch the same step forward, nothing longer than four, and where each monitor looks from.
 All green before a release.
 
 **A test never reaches the machine it runs on.** One did: the 1.x installer test

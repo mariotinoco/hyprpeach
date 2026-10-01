@@ -3,7 +3,7 @@
 // Kept out of Ports.qml for the reason Omarchy keeps its own Model.js files
 // there: a filter and a label are the parts that are wrong quietly, and a plain
 // function can be run against a captured `listening-ports list` document without
-// a compositor. tests/dev-ports.test.sh does exactly that.
+// a compositor. tests/ports.test.sh does exactly that.
 
 function parse(raw) {
   try {

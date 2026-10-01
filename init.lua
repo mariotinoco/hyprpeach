@@ -34,7 +34,7 @@ local peach = {}
 --- because nobody else knows what is on your desk.
 --- NINE DESKTOPS: A 3 x 3, AND NOT A SETTING.
 ---
---- The overview draws a 3 x 3, and animated-desktops gives each of the nine
+--- The overview draws a 3 x 3, and animated gives each of the nine
 --- its own place in one scene, on a loop where 9 -> 1 is a step like any
 --- other; a desk of seven or twelve desktops has neither, so the number is
 --- fixed here rather than offered as an option somebody could set and quietly

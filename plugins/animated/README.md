@@ -5,11 +5,17 @@ desktop, drawn in real time as one picture across every monitor. Switching
 desktops flies you from one to the next.
 
 ```bash
-hyprpeach plugin add animated-desktops
+hyprpeach plugin add animated
 ```
 
-It needs [desktops](../../README.md#more-plugins). The first add builds the
-renderer, which takes a few minutes.
+It needs [desktops](../../README.md#more-plugins). With
+[the overview](../overview/README.md) added too, its cells show the nine scenes
+side by side.
+
+The first add builds the renderer, which takes a few minutes. You do not need
+Rust for it: the build uses the Rust pinned in `renderer/mise.toml`, which
+[mise](https://mise.jdx.dev) — part of every Omarchy install — fetches into its
+own folder the first time. A Rust you already have is left alone.
 
 ## Scenes
 
@@ -41,7 +47,7 @@ covering more ground. **quick** (0.8 s) is the default; **snappy** (0.45 s) is
 for when the move is in the way of the work; **calm** (1.6 s) is for watching
 it.
 
-Both settings live in `~/.config/hyprpeach/animated-desktops.json`. The two
+Both settings live in `~/.config/hyprpeach/animated.json`. The two
 commands write it; you can edit it by hand too, against
 [settings.schema.json](settings.schema.json). Either way it takes effect within
 a second.
@@ -79,18 +85,18 @@ is untested; `HYPRPEACH_SCALE` (default `0.5`) sets the internal resolution.
 A native renderer — Rust and [wgpu](https://wgpu.rs), in `renderer/` — drawn
 on each monitor's background layer. A scene is one shader in
 `renderer/src/scenes/`; `renderer/src/common.wgsl` says what it has to define.
-The service in `AnimatedDesktops.qml` keeps the renderer running and rebuilds it when an
+The service in `Animated.qml` keeps the renderer running and rebuilds it when an
 update changes its source; `prepare` does the building.
 
 To see a scene on a desk you do not have, give the renderer that desk's
 `hyprctl -j monitors`:
 
 ```bash
-~/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-desktops preview monitors.json desk.png
+~/.local/share/hyprpeach/animated/hyprpeach-animated preview monitors.json desk.png
 ```
 
 `renderer/layouts/` holds the four desks above.
 
-The program lives in `~/.local/share/hyprpeach/animated-desktops` and the build in
+The program lives in `~/.local/share/hyprpeach/animated` and the build in
 `~/.cache/hyprpeach`. Removing the plugin leaves them; delete those two folders
 to reclaim the space.

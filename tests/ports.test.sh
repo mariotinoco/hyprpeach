@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs plugins/dev-ports/listening-ports against a sandbox: a fake `ss` earlier on PATH
+# Runs plugins/ports/listening-ports against a sandbox: a fake `ss` earlier on PATH
 # feeding it captured output, and, for the signal half, a listener this test
 # starts and is the only thing that ever signals. Nothing here touches a process
 # it did not create.
@@ -29,7 +29,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPOSITORY_ROOT=$PWD
-READER="$REPOSITORY_ROOT/plugins/dev-ports/listening-ports"
+READER="$REPOSITORY_ROOT/plugins/ports/listening-ports"
 
 failures=0
 checks=0
@@ -268,7 +268,7 @@ RECORDS
       emptyTooltip: M.barTooltip(M.barSummary([])),
       confirm: M.confirmMessage(port(8797), "TERM")
     }))
-  ' "$REPOSITORY_ROOT/plugins/dev-ports/Model.js" "$SANDBOX/model.json" > "$SANDBOX/model.out"
+  ' "$REPOSITORY_ROOT/plugins/ports/Model.js" "$SANDBOX/model.json" > "$SANDBOX/model.out"
   model() { jq -r "$1" "$SANDBOX/model.out"; }
 
   # Only dev ports: not sshd (not yours), not Chrome or Steam (no checkout),

@@ -1,5 +1,5 @@
 //! What the person chose: the scene and the speed, from
-//! ~/.config/hyprpeach/animated-desktops.json. The choices, their defaults and
+//! ~/.config/hyprpeach/animated.json. The choices, their defaults and
 //! what each means are in settings.schema.json beside the plugin's manifest,
 //! which the CLI reads too; this compiles it in rather than repeating it.
 
@@ -44,7 +44,7 @@ fn default_of(key: &str) -> Value {
 
 pub fn path() -> PathBuf {
     let configuration = std::env::var("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"));
-    configuration.join("hyprpeach/animated-desktops.json")
+    configuration.join("hyprpeach/animated.json")
 }
 
 /// The file, each key falling back to the schema's default when it is missing,

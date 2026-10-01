@@ -41,11 +41,22 @@ Item {
   }
   onOpenedChanged: root.announce()
 
+  // Closed by the switch itself, not here: the library announces it (below),
+  // and the overview closes on that the same way it does for a number key.
+  // So a switch never lands after the overview has gone, which is what lets
+  // the number on screen stay quiet for a switch made from the grid. The
+  // timer is only for a library that never answers.
   function focusDesktop(desktop) {
     if (desktop < 1) return
     focuser.command = ["hyprctl", "eval", "require(\"hyprpeach\").focus_desktop({ desktop = " + desktop + " })"]
     focuser.running = true
-    root.close()
+    unanswered.restart()
+  }
+
+  Timer {
+    id: unanswered
+    interval: 1500
+    onTriggered: root.close()
   }
 
   function toplevelFor(clientAddress) {
@@ -58,8 +69,18 @@ Item {
 
   Connections {
     target: Hyprland
+    // ANY DESK SWITCH CLOSES THE OVERVIEW -- a cell chosen here, and equally
+    // SUPER + 2 pressed while it is open, or a click on the bar's strip: the
+    // grid is a way to choose, and once something has chosen it has done its
+    // job. Left open, it would sit over a desk that has already moved.
     function onRawEvent(event) {
-      if (event.name === "custom" && event.data === "hyprpeach-overview,toggle") root.toggle()
+      if (event.name !== "custom") return
+      var data = String(event.data || "")
+      if (data === "hyprpeach-overview,toggle") root.toggle()
+      else if (data.indexOf("hyprpeach-desktop,") === 0 && root.opened) {
+        unanswered.stop()
+        root.close()
+      }
     }
   }
 
@@ -81,7 +102,7 @@ Item {
 
   Process { id: focuser }
 
-  // OPEN AND CLOSED, ANNOUNCED -- for the animated-desktops renderer, which draws each
+  // OPEN AND CLOSED, ANNOUNCED -- for the animated renderer, which draws each
   // desktop's viewport in the cells this leaves see-through, and has to know
   // when to rise above the windows to do it. SUPER + TAB only says "toggle";
   // this overview is what knows which way it went, and closes on keys and
@@ -104,12 +125,12 @@ Item {
     announcer.running = true
   }
 
-  // Whether the animated desktops are behind the desk (plugins/animated-desktops writes this).
+  // Whether the animated desktops are behind the desk (plugins/animated writes this).
   // With it, the cells are windows onto the universe rather than onto the
   // wallpaper: no scrim, no picture, only the frames and the live windows.
   property bool animated: false
   FileView {
-    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated-desktops"
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/hyprpeach-animated"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
@@ -141,6 +162,9 @@ Item {
         screen: modelData
 
         readonly property var monitor: Model.monitorNamed(root.state, panel.screen ? String(panel.screen.name || "") : "")
+        // The desktop this screen is held on, or 0: a held screen stays where
+        // it is whichever cell is chosen, and its grid has to say so.
+        readonly property int heldDesktop: panel.monitor && root.heldPanels[panel.monitor.name] !== undefined ? root.heldPanels[panel.monitor.name] : 0
         readonly property var grid: panel.monitor ? Model.monitorGrid(panel.monitor) : ({ cells: [], scale: 1 })
 
         visible: root.opened
@@ -267,6 +291,18 @@ Item {
               border.width: cell.current ? Math.max(3, Math.round(cell.height * 0.006)) : (hover.containsMouse ? 2 : 1)
               border.color: cell.current ? Color.foreground
                 : Util.alpha(Color.foreground, hover.containsMouse ? 0.7 : 0.25)
+            }
+
+            // HELD: this screen stays on this desktop while the rest move.
+            Text {
+              visible: cell.modelData.desktop === panel.heldDesktop
+              anchors { right: parent.right; top: parent.top; margins: Math.round(cell.height * 0.04) }
+              text: "held"
+              color: Color.foreground
+              style: Text.Outline
+              styleColor: Util.alpha(Color.background, 0.8)
+              font.family: Style.font.family
+              font.pixelSize: Math.round(cell.height * 0.08)
             }
 
             Text {

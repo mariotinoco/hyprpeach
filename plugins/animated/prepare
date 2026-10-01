@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Builds the animated renderer.
+#
+# Run by `hyprpeach plugin add animated`, by `hyprpeach upgrade`, and by the
+# plugin's service on every start with `--if-stale`, which returns at once when
+# nothing changed. Everything it makes lives outside the plugin's folder --
+# the build under ~/.cache, the program under ~/.local/share -- so
+# `omarchy plugin update` never meets a file it did not ship.
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)
+DATA="$HOME/.local/share/hyprpeach/animated"
+TARGET="$HOME/.cache/hyprpeach/animated-target"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+# What the build was made from: the renderer's own files, hashed. Not a git
+# revision, because the stamp has to mean the same thing in any copy.
+source_stamp() {
+  (cd "$HERE/renderer" && cat mise.toml Cargo.toml Cargo.lock build.rs src/*.rs src/*.wgsl src/scenes/*.wgsl) | sha256sum | cut -d' ' -f1
+}
+
+ready() {
+  [[ -x $DATA/hyprpeach-animated && $(cat "$DATA/stamp" 2>/dev/null) == "$(source_stamp)" ]]
+}
+
+# THE RUST COMES FROM MISE, pinned in renderer/mise.toml, so nobody has to
+# install a toolchain to add a wallpaper. Omarchy ships mise; a machine
+# without it falls back to whatever cargo is on PATH.
+#
+# Trusted and installed explicitly rather than left to `mise exec`, which only
+# does both on its own outside mise's paranoid mode.
+build() {
+  local cargo=(cargo)
+  if command -v mise >/dev/null; then
+    mise trust "$HERE/renderer/mise.toml" >/dev/null 2>&1 || true
+    if [[ -n $(mise -C "$HERE/renderer" ls --missing 2>/dev/null) ]]; then
+      say "installing Rust $(sed -n 's/^rust = "\(.*\)"/\1/p' "$HERE/renderer/mise.toml") with mise, once (a few minutes)"
+    fi
+    mise -C "$HERE/renderer" install --quiet >/dev/null || die "mise could not install Rust for the build (renderer/mise.toml)"
+    cargo=(mise -C "$HERE/renderer" exec -- cargo)
+  elif ! command -v cargo >/dev/null; then
+    die "animated is built from source, with Rust from mise -- and there is neither mise nor Rust here.\n  Install mise: omarchy pkg add mise-bin"
+  fi
+  say "building the animated renderer (the first build takes a few minutes)"
+  "${cargo[@]}" build --release --locked --quiet --manifest-path "$HERE/renderer/Cargo.toml" --target-dir "$TARGET"
+  mkdir -p "$DATA"
+  install -m 755 "$TARGET/release/hyprpeach-animated" "$DATA/hyprpeach-animated"
+  source_stamp > "$DATA/stamp"
+}
+
+main() {
+  if [[ ${1:-} == --if-stale ]] && ready; then return 0; fi
+  ready || build
+  # An earlier build of this renderer, under the plugin's old name.
+  rm -f "$DATA/hyprpeach-animated-desktops"
+  # The planet scene's NASA imagery, which an earlier build fetched here. No
+  # scene reads it any more; it is ours, and it is 80 MB.
+  rm -rf "${DATA:?}/assets"
+  say "animated is ready"
+}
+
+main "$@"

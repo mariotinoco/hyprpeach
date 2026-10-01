@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "animated-desktops settings",
-  "description": "~/.config/hyprpeach/animated-desktops.json (under $XDG_CONFIG_HOME when that is set). `hyprpeach scene` and `hyprpeach speed` write it, and it can be edited by hand; the running renderer looks at it once a second either way. A key left out takes the default here. The renderer and the CLI both read their choices and defaults from this file, so this is the only list of them.",
+  "title": "animated settings",
+  "description": "~/.config/hyprpeach/animated.json (under $XDG_CONFIG_HOME when that is set). `hyprpeach scene` and `hyprpeach speed` write it, and it can be edited by hand; the running renderer looks at it once a second either way. A key left out takes the default here. The renderer and the CLI both read their choices and defaults from this file, so this is the only list of them.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

@@ -1,4 +1,4 @@
-//! hyprpeach animated-desktops: a scene drawn natively on every monitor's background
+//! hyprpeach animated: a scene drawn natively on every monitor's background
 //! layer, as one picture across the desk, composed around the home monitor.
 //!
 //! Wayland layer-shell surfaces (one per output) + wgpu (Vulkan). renderer.rs
@@ -6,7 +6,7 @@
 //! what a scene is. Hyprland's event socket moves the camera and picks the
 //! scene.
 //!
-//! `hyprpeach-animated-desktops preview <monitors.json> <out.png>` draws a desk that need
+//! `hyprpeach-animated preview <monitors.json> <out.png>` draws a desk that need
 //! not be this one -- the JSON is `hyprctl -j monitors` from any machine --
 //! so a scene can be seen on layouts nobody here owns.
 
@@ -65,10 +65,18 @@ fn shortest(from: f32, to: f32) -> f32 {
 }
 
 impl Camera {
+    /// A switch to the desktop the desk is already on -- or already flying
+    /// to -- is no switch: the library still announces it (SUPER + 5 on 5,
+    /// a click on the current cell), and restarting the clock would play the
+    /// surge of a flight that goes nowhere.
     fn aim(&mut self, desktop: i32, now: Instant) {
         let (position, _) = self.at(now);
+        let destination = position + shortest(position, (desktop - 1).rem_euclid(9) as f32);
+        if (destination - self.position_to).abs() < 1e-3 {
+            return;
+        }
         self.position_from = position;
-        self.position_to = position + shortest(position, (desktop - 1).rem_euclid(9) as f32);
+        self.position_to = destination;
         self.started = now;
     }
 
@@ -459,7 +467,7 @@ fn main() {
     let arguments: Vec<String> = std::env::args().collect();
     if arguments.get(1).map(String::as_str) == Some("preview") {
         let (Some(monitors), Some(output)) = (arguments.get(2), arguments.get(3)) else {
-            eprintln!("usage: hyprpeach-animated-desktops preview <monitors.json> <out.png>");
+            eprintln!("usage: hyprpeach-animated preview <monitors.json> <out.png>");
             std::process::exit(2);
         };
         return preview(monitors, output);
@@ -520,6 +528,21 @@ mod tests {
         let (position, _) = camera.at(Instant::now());
         camera.aim(to, Instant::now());
         camera.position_to - position
+    }
+
+    #[test]
+    fn the_desktop_you_are_on_is_no_flight() {
+        let long_ago = Instant::now() - std::time::Duration::from_secs(60);
+        let mut camera = Camera { position_from: 0.0, position_to: 0.0, started: long_ago, seconds: 0.8 };
+        camera.aim(5, long_ago);
+        let now = Instant::now();
+        camera.aim(5, now);
+        assert!(camera.at(now + std::time::Duration::from_millis(400)).1.abs() < 1e-3, "pressing 5 on 5 surged");
+        // Mid-flight to 6, pressing 6 again carries on rather than starting over.
+        camera.aim(6, now);
+        let started = camera.started;
+        camera.aim(6, now + std::time::Duration::from_millis(300));
+        assert_eq!(camera.started, started);
     }
 
     #[test]

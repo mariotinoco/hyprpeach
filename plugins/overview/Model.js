@@ -1,7 +1,7 @@
 // Everything the overview decides that is not drawing: which desktops a
 // monitor has, which windows are on each, and how big a cell can be.
 //
-// Kept out of Overview.qml for the reason dev-ports keeps its own: these are the
+// Kept out of Overview.qml for the reason ports keeps its own: these are the
 // parts that are wrong quietly, and a plain function can be checked against a
 // captured `hyprctl -j` document without a compositor. tests/overview.test.sh
 // does exactly that.
@@ -52,7 +52,7 @@ function logicalRect(monitor) {
 // IT, which reads the same on any of those, and choosing one still turns the
 // whole desk.
 //
-// The SAME arithmetic as plugins/animated-desktops's renderer (overviewCell in
+// The SAME arithmetic as plugins/animated's renderer (overviewCell in
 // common.wgsl), in the monitor's logical pixels: 3 x 3 inside 92% x 86% of
 // it, gaps of 1.2% of its height, cells in its own aspect, centred. If the two
 // disagree, the animated desktop in each cell and these frames slide apart.

@@ -2,4 +2,4 @@
 .claude/
 *.png
 __pycache__/
-plugins/animated-desktops/renderer/target/
+plugins/animated/renderer/target/
