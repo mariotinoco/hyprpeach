@@ -603,10 +603,11 @@ command_setting() {
   say "$key: $value"
 }
 
-# A RENAMED PLUGIN, CARRIED OVER: run by hyprpeach's own service every time
-# the shell loads it -- which `omarchy plugin update` makes it do -- and by
-# `hyprpeach upgrade`. So the move happens whichever way the update came, and
-# without anyone knowing to ask for it. Does nothing when there is nothing to
+# A RENAMED PLUGIN, CARRIED OVER: run by the desktops library every time
+# Hyprland loads its config -- which every update ends with -- by hyprpeach's
+# own service when the shell loads it, and by `hyprpeach upgrade`. So the move
+# happens whichever way the update came, and without anyone knowing to ask for
+# it. Does nothing when there is nothing to
 # move, which is nearly always; safe to run any number of times.
 #
 # Only a link of ours is moved, one pointing into this clone at the old

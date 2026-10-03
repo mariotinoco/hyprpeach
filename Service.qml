@@ -16,11 +16,12 @@ import Quickshell.Io
 // takes a file that is not hyprpeach's. bin/hyprpeach says exactly what it
 // will and will not replace.
 //
-// And A PLUGIN THAT CHANGED NAME, CARRIED OVER. `omarchy plugin update` moves
-// the clone and has the shell load its plugins again, which runs this --
-// already the new release's -- so a renamed plugin's link, bar place and
-// files follow it with nobody asking. `migrate` does nothing when nothing was
-// renamed, which is every load but the first after such a release.
+// And A PLUGIN THAT CHANGED NAME, CARRIED OVER, at login and whenever the
+// shell restarts. Not on its own after an update: `omarchy plugin update`
+// only rescans, which leaves this running rather than loading it again --
+// so the library runs the same migration whenever Hyprland loads its config,
+// which every update does (init.lua says how that was found). `migrate`
+// does nothing when nothing was renamed, which is nearly every run.
 Item {
   id: root
   readonly property string command: Qt.resolvedUrl("bin/hyprpeach").toString().replace(/^file:\/\//, "")

@@ -850,6 +850,25 @@ local function place_tray_popups()
   end
 end
 
+--- A RENAMED PLUGIN IS CARRIED OVER ON EVERY CONFIG LOAD.
+---
+--- `hyprpeach migrate` moves a plugin that changed name -- link, bar place,
+--- enabled entry, files (bin/hyprpeach says how). hyprpeach's shell service
+--- runs it when the shell loads it, but an update does not make the shell do
+--- that: `omarchy plugin update` only rescans, which loads new plugins and
+--- leaves a running one running. Measured upgrading this machine from 3.0.0
+--- to 3.1.0: the migration did not run, and the ports widget and the animated
+--- background were gone until the shell restarted.
+---
+--- What an update DOES do is reload Hyprland -- `hyprpeach upgrade` does it,
+--- and the README says to after a bare `omarchy plugin update` -- and that
+--- runs this file, freshly read from the updated clone. So the newest
+--- migration runs from here, whatever version did the updating. It does
+--- nothing when there is nothing to move, which is nearly every load.
+local function migrate_renamed_plugins()
+  hl.exec_cmd((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hyprpeach/bin/hyprpeach migrate")
+end
+
 function peach.setup(options)
   options = options or {}
   if options.monitors_bottom_to_top == nil or #options.monitors_bottom_to_top < 1 then
@@ -875,6 +894,7 @@ function peach.setup(options)
   end
 
   hl.on("window.open", bring_window_onto_the_desk)
+  migrate_renamed_plugins()
   place_tray_popups()
 
   state.focus_follows_fling = chosen("focus_follows_fling")

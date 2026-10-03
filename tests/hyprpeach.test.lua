@@ -19,7 +19,7 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {}, handlers = {}, window_rules = {} }
+  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {}, handlers = {}, window_rules = {}, executed = {} }
 
   -- The held-panel state is published to a file for the bar strip to watch, so
   -- writes are captured here rather than landing in the running session's
@@ -69,6 +69,7 @@ local function stub_hyprland(parameters)
     get_monitor_at_cursor = function() return parameters.monitor_at_cursor end,
     get_monitors = function() return parameters.monitor_list or {} end,
     on = function(event, handler) recorder.handlers[event] = handler end,
+    exec_cmd = function(command) recorder.executed[#recorder.executed + 1] = command end,
     window_rule = function(rule) recorder.window_rules[#recorder.window_rules + 1] = rule end,
     notification = { create = function(note) recorder.notifications[#recorder.notifications + 1] = note.text end },
     dsp = {
@@ -169,6 +170,18 @@ do
   check({ label = "  ...that stops it moving its own window", got = toolbox and toolbox.suppress_event, want = "x11configurerequest" })
   check({ label = "  ...and puts it right of the bar, at the bottom, beside the tray", got = toolbox and table.concat(toolbox.move, " "), want = "47 (monitor_h-window_h-10)" })
   check({ label = "no rule for every window: dialogs move themselves for good reasons", got = #recorder.window_rules, want = 1 })
+end
+
+print("\na plugin that changed name is carried over when Hyprland loads its config")
+do
+  -- An update does not restart the shell, so its service never runs the
+  -- migration; the Hyprland reload every update does is what reaches new code.
+  local _, recorder = fresh_peach({})
+  local migrations = 0
+  for _, command in ipairs(recorder.executed) do
+    if command:find("/.config/omarchy/plugins/hyprpeach/bin/hyprpeach migrate", 1, true) then migrations = migrations + 1 end
+  end
+  check({ label = "loading the config runs hyprpeach migrate, from the installed clone", got = migrations, want = 1 })
 end
 
 print("\nnine desktops, a 3 x 3, and not a setting")
