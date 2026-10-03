@@ -603,17 +603,39 @@ command_setting() {
   say "$key: $value"
 }
 
-# A RENAMED PLUGIN, CARRIED OVER: run by the desktops library every time
-# Hyprland loads its config -- which every update ends with -- by hyprpeach's
-# own service when the shell loads it, and by `hyprpeach upgrade`. So the move
-# happens whichever way the update came, and without anyone knowing to ask for
-# it. Does nothing when there is nothing to
-# move, which is nearly always; safe to run any number of times.
-#
-# Only a link of ours is moved, one pointing into this clone at the old
-# folder. A copy or a link elsewhere is somebody's own, and stays.
-command_migrate() {
-  [[ $ROOT == "$(readlink -f "$PLUGIN_DIRECTORY" 2>/dev/null)" ]] || return 0
+# WHICH HYPRPEACH THE RUNNING SHELL LOADED: this clone's version and commit,
+# written by hyprpeach's service whenever the shell loads it. An update moves
+# the clone but does not restart the shell -- `omarchy plugin update` only
+# rescans, which loads new plugins and leaves loaded ones running the code
+# they were loaded with. Measured upgrading this machine from 3.0.0: the
+# overview went on running 3.0.0's QML, watching a file the renamed plugin no
+# longer wrote, and drew the theme's wallpaper where the scene should be.
+SHELL_LOADED_MARKER="${XDG_RUNTIME_DIR:-/tmp}/hyprpeach-shell-loaded"
+
+installed_release() {
+  printf '%s %s\n' "$(manifest_field "$ROOT/manifest.json" version)" "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"
+}
+
+# The shell is running hyprpeach code older than the clone: it is up, and what
+# it loaded is not what is installed -- including a shell loaded by a release
+# from before this marker existed, which wrote none.
+shell_is_stale() {
+  pgrep -x quickshell >/dev/null 2>&1 || return 1
+  [[ $(cat "$SHELL_LOADED_MARKER" 2>/dev/null) != "$(installed_release)" ]]
+}
+
+# Detached, so a caller the restart kills -- anything the shell started --
+# does not take the restart down with it.
+restart_shell() {
+  setsid -f omarchy restart shell >/dev/null 2>&1 || true
+}
+
+# A RENAMED PLUGIN, CARRIED OVER: its link, bar place, enabled entry and
+# files, for every entry in RENAMED_PLUGINS still under its old name. Only a
+# link of ours is moved, one pointing into this clone at the old folder; a
+# copy or a link elsewhere is somebody's own, and stays. Succeeds when it
+# moved something, so the caller knows to have the shell pick it up.
+move_renamed_plugins() {
   local pair old new old_link new_link moved=()
   for pair in "${RENAMED_PLUGINS[@]}"; do
     read -r old new <<<"$pair"
@@ -626,12 +648,41 @@ command_migrate() {
     move_plugin_files "$old" "$new"
     moved+=("$old → $new")
   done
-  (( ${#moved[@]} )) || return 0
-  # The running shell reads shell.json again and finds the new folders: the
-  # widget comes back where it was, the service under its new name.
-  omarchy-shell shell reloadConfig >/dev/null 2>&1 || true
-  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  (( ${#moved[@]} )) || return 1
   say "renamed: ${moved[*]}"
+}
+
+# THE RUNNING DESK BROUGHT UP TO THE INSTALLED RELEASE. Run by the desktops
+# library every time Hyprland loads its config -- which every update ends
+# with, whatever version did the updating -- and by `hyprpeach upgrade`.
+# Renamed plugins are moved, and a shell running older hyprpeach code is
+# restarted, once, so every plugin runs what is installed. Nothing at all
+# when the desk is current, which is every reload but the one after an
+# update -- and nothing at Hyprland's own start, before there is a shell.
+command_migrate() {
+  [[ $ROOT == "$(readlink -f "$PLUGIN_DIRECTORY" 2>/dev/null)" ]] || return 0
+  local moved=no
+  move_renamed_plugins && moved=yes
+  if pgrep -x quickshell >/dev/null 2>&1 && { [[ $moved == yes ]] || shell_is_stale; }; then
+    say "restarting the shell onto hyprpeach $(manifest_field "$ROOT/manifest.json" version)"
+    restart_shell
+  fi
+  return 0
+}
+
+# Run by hyprpeach's service each time the shell loads it: record what it
+# loaded, keep `hyprpeach` on PATH, and carry over a renamed plugin -- for
+# which the shell, freshly loaded, only needs to read its config and folders
+# again, not restart.
+command_shell_loaded() {
+  command_link_command
+  [[ $ROOT == "$(readlink -f "$PLUGIN_DIRECTORY" 2>/dev/null)" ]] || return 0
+  installed_release > "$SHELL_LOADED_MARKER"
+  if move_renamed_plugins; then
+    omarchy-shell shell reloadConfig >/dev/null 2>&1 || true
+    omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  fi
+  return 0
 }
 
 # The bar entry keeps its section, its place in it, and any settings of its
@@ -690,7 +741,7 @@ command_help() {
   hyprpeach speed [speed]         animated desktops: calm, quick or snappy switches
   hyprpeach version               the same as plugin list
   hyprpeach link-command          put `hyprpeach` on PATH (the plugin does this itself)
-  hyprpeach migrate               carry a renamed plugin over (the plugin does this itself)
+  hyprpeach migrate               bring the running desk up to the installed release (done for you)
   hyprpeach help                  this
 
   Adding desktops again re-reads your monitors.
@@ -709,6 +760,7 @@ main() {
       ;;
     upgrade) command_upgrade ;;
     migrate) command_migrate ;;
+    shell-loaded) command_shell_loaded ;;
     scene) command_setting scene "${2:-}" ;;
     speed) command_setting speed "${2:-}" ;;
     version) command_plugin_list ;;

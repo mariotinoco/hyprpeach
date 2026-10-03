@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprpeach.desktops",
   "name": "Multi-Monitor Desktops",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "author": "hyprpeach",
   "description": "Multi-monitor desktop indicators for Hyprland. Every monitor's bar draws its own desktop, clicking one moves the whole desk together, and a big number on screen confirms the switch.",
   "kinds": [

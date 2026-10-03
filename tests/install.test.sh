@@ -108,6 +108,20 @@ printf 'cargo %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
 while (( $# )); do [[ $1 == --target-dir ]] && target=$2; shift; done
 mkdir -p "$target/release" && printf '#!/bin/sh\n' > "$target/release/hyprpeach-animated" && chmod +x "$target/release/hyprpeach-animated"
 FAKE
+# Whether a shell is running is the sandbox's to say -- a file in its HOME --
+# not the machine's: the real pgrep would find the shell this runs under, and
+# hyprpeach would restart it. setsid runs its command in place, so what it
+# starts is logged in order.
+cat > "$FAKES/pgrep" <<'FAKE'
+#!/usr/bin/env bash
+printf 'pgrep %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
+[[ "$*" == "-x quickshell" && -f $HOME/.shell-running ]]
+FAKE
+cat > "$FAKES/setsid" <<'FAKE'
+#!/usr/bin/env bash
+[[ ${1:-} == -f ]] && shift
+exec "$@"
+FAKE
 cat > "$FAKES/mise" <<'FAKE'
 #!/usr/bin/env bash
 printf 'mise %s\n' "$*" >> "$HYPRPEACH_TEST_LOG"
@@ -123,6 +137,11 @@ export HYPRPEACH_TEST_LOG="$LOG"
 # The XDG directories default to under HOME, which is the sandbox's; one set
 # in the environment would point a command straight at the real machine.
 unset XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME
+# The runtime directory holds what hyprpeach tells the RUNNING desk -- which
+# release the shell loaded, which panels are held. The real one is this
+# machine's; the sandbox gets its own.
+export XDG_RUNTIME_DIR="$SANDBOX/runtime"
+mkdir -p "$XDG_RUNTIME_DIR"
 export PATH="$FAKES:$OMARCHY_BINARIES:$PATH"
 git_quietly() { git -c user.name=test -c user.email=test@example.invalid -c advice.detachedHead=false "$@"; }
 
@@ -135,11 +154,12 @@ use_home() {
 }
 
 use_home guard
-for name in omarchy omarchy-shell hyprctl cargo mise; do
+for name in omarchy omarchy-shell hyprctl cargo mise pgrep setsid; do
   [[ $(command -v "$name") == "$FAKES/$name" ]] || { echo "REFUSING TO RUN: $name resolves to $(command -v "$name"), not the fake"; exit 1; }
 done
 [[ $HOME == "$SANDBOX"/* ]] || { echo "REFUSING TO RUN: HOME is $HOME"; exit 1; }
 [[ -z ${XDG_CONFIG_HOME:-} ]] || { echo "REFUSING TO RUN: XDG_CONFIG_HOME is $XDG_CONFIG_HOME"; exit 1; }
+[[ $XDG_RUNTIME_DIR == "$SANDBOX"/* ]] || { echo "REFUSING TO RUN: XDG_RUNTIME_DIR is $XDG_RUNTIME_DIR"; exit 1; }
 
 # ---------------------------------------------------------------- the remote
 
@@ -430,6 +450,7 @@ echo built > "$HOME/.local/share/hyprpeach/animated-desktops/hyprpeach-animated-
 echo compiled > "$HOME/.cache/hyprpeach/animated-desktops-target/marker"
 echo '{"$schema":"/old/plugins/animated-desktops/settings.schema.json","scene":"nebula","speed":"snappy"}' > "$HOME/.config/hyprpeach/animated-desktops.json"
 : > "$LOG"
+touch "$HOME/.shell-running"
 hyprpeach migrate > "$SANDBOX/migrate.out" 2>&1
 check "the migration succeeds" "$?" "0"
 check "ports is linked under its new name" "$(link_of hyprpeach.ports)" "hyprpeach/plugins/ports"
@@ -440,11 +461,13 @@ check "  ...and the stale entry of that name does not come back beside it" "$(jq
 check "the service stays enabled, under its new name" "$(jq -c '[.plugins[].id]' "$SHELL_CONFIGURATION")" '["hyprpeach","hyprpeach.animated"]'
 check "its build moves with it" "$(cat "$HOME/.local/share/hyprpeach/animated/hyprpeach-animated-desktops") $(cat "$HOME/.cache/hyprpeach/animated-target/marker")" "built compiled"
 check "the settings are kept, pointing at the schema where it now is" "$(jq -r '[.scene, .speed, ."$schema"] | join(" ")' "$HOME/.config/hyprpeach/animated.json")" "nebula snappy $PLUGIN/plugins/animated/settings.schema.json"
-check "the shell is told to read it all again" "$(called 'omarchy-shell shell reloadConfig')$(called 'omarchy-shell shell rescanPlugins')" "11"
+check "the shell is restarted, so every plugin runs the new release" "$(called 'omarchy restart shell')" "1"
+# The restarted shell's hyprpeach service says what it loaded.
+hyprpeach shell-loaded >/dev/null 2>&1
 cp "$SHELL_CONFIGURATION" "$SANDBOX/shell.after"
 : > "$LOG"
 hyprpeach migrate > "$SANDBOX/migrate.out" 2>&1
-check "run again, it changes nothing" "$(cmp -s "$SHELL_CONFIGURATION" "$SANDBOX/shell.after" && echo same)$(grep -c . "$LOG")" "same0"
+check "run again, it changes nothing" "$(cmp -s "$SHELL_CONFIGURATION" "$SANDBOX/shell.after" && echo same)$(grep -c '^omarchy' "$LOG")" "same0"
 rm "$P/hyprpeach.ports"
 mkdir "$P/hyprpeach.dev-ports" && echo '{}' > "$P/hyprpeach.dev-ports/manifest.json"
 hyprpeach migrate >/dev/null 2>&1
@@ -456,6 +479,30 @@ check "a script still adding a plugin by its old name works" "$?$(link_of hyprpe
 check "  ...and is told the new one" "$(grep -c 'dev-ports is now called ports' "$SANDBOX/old-name.out")" "1"
 hyprpeach plugin remove dev-ports >/dev/null 2>&1
 check "  ...and removing it by that name works too" "$([[ -L $P/hyprpeach.ports ]] && echo linked || echo none)" "none"
+
+echo
+echo "a shell running older hyprpeach code than is installed is restarted, once"
+# An update moves the clone and only rescans the shell, which leaves loaded
+# plugins running the code they were loaded with. Upgrading from 3.0.0 left
+# the overview drawing the wallpaper where the scene was.
+MARKER="$XDG_RUNTIME_DIR/hyprpeach-shell-loaded"
+hyprpeach shell-loaded >/dev/null 2>&1
+check "the shell's hyprpeach service records the release it loaded" "$(cat "$MARKER")" "$(jq -r .version "$PLUGIN/manifest.json") $(git -C "$PLUGIN" rev-parse HEAD)"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1
+check "a shell on the installed release is left alone" "$(called 'omarchy restart shell')" "0"
+echo "3.0.0 0000000" > "$MARKER"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1
+check "one on an older release is restarted" "$(called 'omarchy restart shell')" "1"
+rm -f "$MARKER"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1
+check "  ...as is one from before releases said which they were" "$(called 'omarchy restart shell')" "1"
+rm -f "$HOME/.shell-running"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1
+check "with no shell running yet -- Hyprland's own start -- nothing is restarted" "$(called 'omarchy restart shell')" "0"
 
 echo
 echo "one Omarchy update moves the plugins with it"

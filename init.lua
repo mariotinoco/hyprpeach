@@ -850,7 +850,9 @@ local function place_tray_popups()
   end
 end
 
---- A RENAMED PLUGIN IS CARRIED OVER ON EVERY CONFIG LOAD.
+--- THE RUNNING DESK IS BROUGHT UP TO THE INSTALLED RELEASE ON EVERY CONFIG
+--- LOAD: a renamed plugin carried over, and a shell still running older
+--- hyprpeach code restarted (bin/hyprpeach, `migrate`).
 ---
 --- `hyprpeach migrate` moves a plugin that changed name -- link, bar place,
 --- enabled entry, files (bin/hyprpeach says how). hyprpeach's shell service
@@ -858,7 +860,8 @@ end
 --- that: `omarchy plugin update` only rescans, which loads new plugins and
 --- leaves a running one running. Measured upgrading this machine from 3.0.0
 --- to 3.1.0: the migration did not run, and the ports widget and the animated
---- background were gone until the shell restarted.
+--- background were gone until the shell restarted; and once it did, the
+--- overview still ran 3.0.0's code and drew the wallpaper where the scene was.
 ---
 --- What an update DOES do is reload Hyprland -- `hyprpeach upgrade` does it,
 --- and the README says to after a bare `omarchy plugin update` -- and that
