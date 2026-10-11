@@ -5,6 +5,7 @@
   "scripts": {
     "test": "tools/test",
     "local-upgrade": "tools/local-upgrade",
-    "release": "tools/release"
+    "release": "tools/release",
+    "release-drift": "tools/release-drift"
   }
 }

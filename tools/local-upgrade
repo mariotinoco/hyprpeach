@@ -49,7 +49,18 @@ main() {
     printf '%s\n' "$errors" >&2
     die "Hyprland reported config errors"
   fi
-  omarchy restart shell >/dev/null 2>&1
+  # NOT `omarchy restart shell`. The reload above ran `hyprpeach migrate`, which
+  # restarts a shell running older code by itself; a second restart from here
+  # overlaps it, and two overlapping restarts leave two shells and two bars
+  # (bin/hyprpeach, command_restart_shell). So this waits for the shell to say
+  # it loaded this commit, which is also the check that it did.
+  local marker="${XDG_RUNTIME_DIR:-/tmp}/hyprpeach-shell-loaded" deadline=$((SECONDS + 30))
+  if pgrep -x quickshell >/dev/null; then
+    until [[ $(cat "$marker" 2>/dev/null) == *" $head" ]]; do
+      (( SECONDS < deadline )) || die "the shell has not loaded $head after 30 seconds.\n  Restart it: omarchy restart shell"
+      sleep 0.2
+    done
+  fi
   "$PLUGIN/bin/hyprpeach" plugin list
 }
 

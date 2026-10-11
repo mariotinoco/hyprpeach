@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# Says where the tags and the GitHub Releases have drifted from this
+# repository, and puts them back: `npm run release-drift` (add `-- --fix`,
+# and `--yes` to skip the question).
+#
+# WHAT IS RELEASED IS WHAT releases/ SAYS. Every release has its notes there,
+# releases/<tag>.md, and nothing else does -- so that folder, on main, is the
+# list, and the tags and the Releases are copies of it. `npm run release`
+# makes the copies; this is for when they stopped agreeing, by hand or by a
+# release that went out wrong.
+#
+#   - a tag on the remote with no notes        WITHDRAWN: its Release and the
+#                                              tag are deleted, remote and local
+#   - a Release whose tag is not on the remote deleted (a draft left behind by
+#                                              a deleted tag is one of these)
+#   - a tag with notes and no Release          published, from the notes
+#   - a Release whose title or text differs    rewritten from the notes; a
+#     from the notes, or is a draft            draft is published
+#   - Latest is not v<manifest.json version>   moved to it
+#   - a local tag the remote does not have,    deleted locally, and fetched
+#     or has pointing somewhere else           again if the remote has it
+#
+# So a release is withdrawn by deleting its notes in a commit on main and
+# running this with --fix -- which is also the only way one is. It is never
+# re-pointed: the version it should have been is released as the next one.
+#
+# REPORTED, NEVER FIXED, because the fix is a decision or a release:
+#
+#   - a version in a manifest.json with no tag: `npm run release` is owed
+#   - notes for a tag that does not exist and no manifest names
+#   - a tag that is not annotated, or not on main: it cannot be moved, so it
+#     is withdrawn (delete its notes) and the next version carries the code
+#   - README.md's pinned commands naming another version
+#
+# --fix refuses unless the tree is clean and HEAD is origin/main: the list it
+# enforces has to be the published one, not a branch that lacks a file.
+# Exits 0 when nothing has drifted, 1 when something has.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+say() { printf '\033[38;5;209m🍑\033[0m %s\n' "$*"; }
+die() { printf '\033[38;5;203m✗\033[0m %b\n' "$*" >&2; exit 1; }
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+notes_title() { head -n 1 "releases/$1.md" | sed 's/^# *//'; }
+notes_body() { tail -n +2 "releases/$1.md" | sed '/./,$!d'; }
+# What GitHub hands back is what was sent, with its own line endings.
+release_field() { jq -r --arg tag "$1" --arg field "$2" '.[] | select(.tag_name == $tag) | .[$field] // ""' "$WORK/releases.json" | tr -d '\r' | sed '/./,$!d'; }
+has() { grep -qxF -- "$2" "$WORK/$1"; }
+
+# The remote, the Releases and the local tags, read once into $WORK.
+read_state() {
+  git fetch --quiet origin main
+  git ls-remote --tags origin > "$WORK/ls-remote"
+  grep -v '\^{}$' "$WORK/ls-remote" | sed 's#.*refs/tags/##' | sort > "$WORK/remote-tags" || true
+  gh api "repos/$REPOSITORY/releases" --paginate | jq -s 'add // []' > "$WORK/releases.json"
+  jq -r '.[] | select(.draft | not) | .tag_name' "$WORK/releases.json" | sort > "$WORK/release-tags"
+  find releases -maxdepth 1 -name '*.md' -printf '%f\n' | sed 's/\.md$//' | sort > "$WORK/noted"
+  git tag --list | sort > "$WORK/local-tags"
+  {
+    printf 'v%s\n' "$(jq -r .version manifest.json)"
+    local manifest
+    for manifest in plugins/*/manifest.json; do
+      printf '%s-v%s\n' "$(basename "$(dirname "$manifest")")" "$(jq -r .version "$manifest")"
+    done
+  } | sort > "$WORK/current"
+}
+
+remote_object() { awk -v ref="refs/tags/$1" '$2 == ref {print $1}' "$WORK/ls-remote"; }
+remote_commit() { awk -v ref="refs/tags/$1^{}" '$2 == ref {print $1}' "$WORK/ls-remote"; }
+
+# Every drift, one per line in $WORK/drift: `kind <TAB> subject <TAB> what to
+# say`. The kinds under `fix` below are the ones --fix acts on; the rest are
+# reported.
+find_drift() {
+  : > "$WORK/drift"
+  local tag id name latest wanted
+  found() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$WORK/drift"; }
+
+  while IFS= read -r tag; do
+    if ! has noted "$tag"; then
+      found withdraw "$tag" "$tag is on the remote and has no notes in releases/: withdrawn"
+      continue
+    fi
+    if [[ -z $(remote_commit "$tag") ]]; then
+      found report "$tag" "$tag is not an annotated tag. It cannot be moved: delete its notes to withdraw it"
+    elif ! git merge-base --is-ancestor "$(remote_commit "$tag")" origin/main 2>/dev/null; then
+      found report "$tag" "$tag is not on main. It cannot be moved: delete its notes to withdraw it"
+    fi
+    if ! has release-tags "$tag"; then
+      if [[ -n $(jq -r --arg tag "$tag" '.[] | select(.tag_name == $tag and .draft) | .id' "$WORK/releases.json") ]]; then
+        found rewrite "$tag" "$tag's Release is still a draft"
+      else
+        found publish "$tag" "$tag has no Release"
+      fi
+    elif [[ $(release_field "$tag" name) != "$tag — $(notes_title "$tag")" ]]; then
+      found rewrite "$tag" "$tag's Release is titled '$(release_field "$tag" name)', and its notes say '$tag — $(notes_title "$tag")'"
+    elif [[ $(release_field "$tag" body) != "$(notes_body "$tag")" ]]; then
+      found rewrite "$tag" "$tag's Release does not say what releases/$tag.md says"
+    fi
+  done < "$WORK/remote-tags"
+
+  while IFS=$'\t' read -r id tag name; do
+    has remote-tags "$tag" || found orphan "$id" "the Release '$name' is for $tag, which is not a tag on the remote"
+  done < <(jq -r '.[] | [.id, .tag_name, .name] | @tsv' "$WORK/releases.json")
+
+  wanted="v$(jq -r .version manifest.json)"
+  latest=$(gh release list --limit 200 --json tagName,isLatest -q '.[] | select(.isLatest) | .tagName')
+  if has remote-tags "$wanted" && has noted "$wanted" && [[ $latest != "$wanted" ]]; then
+    found latest "$wanted" "Latest is ${latest:-nothing}, and manifest.json says $wanted"
+  fi
+
+  while IFS= read -r tag; do
+    if ! has remote-tags "$tag"; then
+      found local "$tag" "the local tag $tag is not on the remote"
+    elif [[ $(git rev-parse "refs/tags/$tag") != "$(remote_object "$tag")" ]]; then
+      found local "$tag" "the local tag $tag is not the one on the remote"
+    fi
+  done < "$WORK/local-tags"
+
+  while IFS= read -r tag; do
+    has remote-tags "$tag" || found report "$tag" "$tag is the version in its manifest.json and is not released: npm run release"
+  done < "$WORK/current"
+  while IFS= read -r tag; do
+    has remote-tags "$tag" || has current "$tag" || found report "$tag" "releases/$tag.md is for a tag that does not exist, and no manifest names it"
+  done < "$WORK/noted"
+  grep -qF -- "--branch $wanted " README.md || found report README "README.md's pinned commands do not name $wanted"
+}
+
+fix() {
+  local kind=$1 subject=$2
+  case $kind in
+    withdraw)
+      if jq -e --arg tag "$subject" 'any(.[]; .tag_name == $tag)' "$WORK/releases.json" >/dev/null; then
+        gh release delete "$subject" --yes >/dev/null
+      fi
+      git push --quiet origin ":refs/tags/$subject"
+      [[ -z $(git ls-remote origin "refs/tags/$subject") ]] || die "$subject is still on the remote after deleting it"
+      git tag -d "$subject" >/dev/null 2>&1 || true
+      ;;
+    orphan) gh api -X DELETE "repos/$REPOSITORY/releases/$subject" >/dev/null ;;
+    publish) gh release create "$subject" --verify-tag --latest=false --title "$subject — $(notes_title "$subject")" --notes "$(notes_body "$subject")" >/dev/null ;;
+    rewrite) gh release edit "$subject" --draft=false --title "$subject — $(notes_title "$subject")" --notes "$(notes_body "$subject")" >/dev/null ;;
+    latest) gh release edit "$subject" --latest >/dev/null ;;
+    local)
+      git tag -d "$subject" >/dev/null
+      if has remote-tags "$subject"; then git fetch --quiet origin "refs/tags/$subject:refs/tags/$subject"; fi
+      ;;
+    *) return 0 ;;
+  esac
+  say "fixed: $subject ($kind)"
+}
+
+print_drift() {
+  local kind subject text
+  while IFS=$'\t' read -r kind subject text; do
+    if [[ $kind == report ]]; then printf '    %s\n' "$text"; else printf '  \033[38;5;209m*\033[0m %s\n' "$text"; fi
+  done < "$WORK/drift"
+}
+
+main() {
+  local fixing=no confirmed=no argument
+  for argument in "$@"; do
+    case $argument in
+      --fix) fixing=yes ;;
+      --yes) confirmed=yes ;;
+      *) die "unknown argument: $argument" ;;
+    esac
+  done
+  REPOSITORY=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+
+  read_state
+  find_drift
+  if [[ ! -s $WORK/drift ]]; then
+    say "$(wc -l < "$WORK/remote-tags") tags, each with its notes and its Release; Latest is v$(jq -r .version manifest.json)"
+    return 0
+  fi
+  print_drift
+  if ! grep -qv '^report' "$WORK/drift"; then
+    die "nothing here is --fix's to fix: each line above is a release or a decision."
+  fi
+  [[ $fixing == yes ]] || die "drifted. The lines marked * are fixed by: npm run release-drift -- --fix"
+
+  [[ -z $(git status --porcelain) ]] || die "uncommitted changes: --fix enforces what is committed."
+  [[ $(git rev-parse HEAD) == "$(git rev-parse origin/main)" ]] || die "HEAD is not origin/main, and the list --fix enforces is main's.\n  Push first, or check main out."
+  if [[ $confirmed != yes ]]; then
+    read -r -p "Fix the lines marked *? Withdrawn tags and their Releases are deleted. [y/N] " answer
+    [[ $answer == [yY] ]] || die "nothing changed"
+  fi
+
+  # Withdrawals first, so Latest is never moved onto something about to go.
+  local kind subject text order
+  for order in withdraw orphan publish rewrite latest local; do
+    while IFS=$'\t' read -r kind subject text; do
+      if [[ $kind == "$order" ]]; then fix "$kind" "$subject"; fi
+    done < "$WORK/drift"
+  done
+
+  read_state
+  find_drift
+  if [[ -s $WORK/drift ]]; then
+    print_drift
+    die "still drifted after --fix."
+  fi
+  say "$(wc -l < "$WORK/remote-tags") tags, each with its notes and its Release; Latest is v$(jq -r .version manifest.json)"
+}
+
+main "$@"

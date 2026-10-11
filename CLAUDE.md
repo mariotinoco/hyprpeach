@@ -44,6 +44,15 @@ entry out, because an install can skip releases. It lives in `manifest.json` and
 version-pinned commands in `README.md` — they move together or the release lies about
 itself. The README's table of what a version promises is the contract; keep it true.
 
+**Major means a config that worked stops working**, not that something behaves
+differently: a chord, a `peach.*` function or a `setup()` option removed, renamed, or
+taking something else. A default that changes is a PATCH -- the option is still
+there and one line keeps the old behaviour -- and so is a key that does its job
+better. 4.0.0 went out for exactly that, a default flipped from `true` to `false`,
+and had to be withdrawn the same day. When two readings of these rules give two
+numbers, the smaller one is right; and **a major is never released on inference**
+-- an agent that concludes one is due stops and asks before any version is written.
+
 **Only releases reach `main`.** Omarchy installs and updates to the newest commit on
 it, so a commit there is shipped to everyone the next time they update, released or
 not. Code lands on `main` together with its release; documentation may follow alone.
@@ -61,6 +70,14 @@ shaped like a release would be offered to it as one. **Never re-point a publishe
 fetch by name, so a moved tag leaves a clone reporting itself correctly pinned while
 running code that exists nowhere. That has already happened here once, and nothing
 noticed for a whole release.
+
+**`releases/` is the list of what is released.** Every tag has its notes there and
+nothing else does, so `npm run release-drift` can say where the remote's tags and
+the Releases stopped agreeing with it, and `-- --fix` puts them back: a Release
+republished from its notes, Latest moved to the manifest's version, a tag with no
+notes WITHDRAWN -- Release and tag deleted. That is the only way a release is taken
+back: delete its notes in a commit on main, release the version it should have been,
+run the fix. Its header lists every case, and which ones it only reports.
 
 **`npm run release` is the release**, and it is how one is done: it checks the tree,
 the version and README's pins, runs every suite, pushes `main` before the tags,

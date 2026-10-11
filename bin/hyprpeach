@@ -627,7 +627,37 @@ shell_is_stale() {
 # Detached, so a caller the restart kills -- anything the shell started --
 # does not take the restart down with it.
 restart_shell() {
-  setsid -f omarchy restart shell >/dev/null 2>&1 || true
+  setsid -f "$ROOT/bin/hyprpeach" restart-shell >/dev/null 2>&1 || true
+}
+
+# ONE RESTART AT A TIME, and a second one asked for meanwhile is dropped.
+#
+# `omarchy restart shell` kills every running shell and then starts one, and
+# two of them running together each start one: two shells, two bars side by
+# side, every widget twice. Measured on this machine releasing 3.1.3 -- two
+# `quickshell -n` three process ids apart, each with its own omarchy-bar layer
+# on both monitors. Quickshell's own no-duplicate check (`-n`) does not catch
+# two that start at once.
+#
+# And two is what an upgrade asks for. `migrate` runs from `hyprpeach upgrade`
+# and again from the Hyprland reload that follows it, a moment later; the
+# shell is stale both times, because the first restart has not got as far as
+# loading hyprpeach's service, which is what records the release it loaded.
+#
+# So the lock is held until the new shell HAS recorded it, not merely until
+# Omarchy's restart returns -- that returns when the shell answers a ping,
+# which is before its plugins load. Whoever finds the lock taken leaves: the
+# restart under way lands on what is installed, which is all they wanted.
+SHELL_RESTART_LOCK="${XDG_RUNTIME_DIR:-/tmp}/hyprpeach-shell-restart.lock"
+
+command_restart_shell() {
+  exec 9>"$SHELL_RESTART_LOCK"
+  flock --nonblock 9 || return 0
+  # 9>&-: nothing the restart starts may inherit the lock and hold it open.
+  omarchy restart shell >/dev/null 2>&1 9>&- || true
+  local deadline=$((SECONDS + 15))
+  while (( SECONDS < deadline )) && shell_is_stale; do sleep 0.2; done
+  return 0
 }
 
 # A RENAMED PLUGIN, CARRIED OVER: its link, bar place, enabled entry and
@@ -760,6 +790,7 @@ main() {
       ;;
     upgrade) command_upgrade ;;
     migrate) command_migrate ;;
+    restart-shell) command_restart_shell ;;
     shell-loaded) command_shell_loaded ;;
     scene) command_setting scene "${2:-}" ;;
     speed) command_setting speed "${2:-}" ;;

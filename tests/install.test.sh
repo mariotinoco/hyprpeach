@@ -70,6 +70,14 @@ case "$1 ${2:-}" in
   "plugin add"|"plugin update"|"plugin remove"|"plugin validate")
     verb=$2; shift 2; exec "omarchy-plugin-$verb" "$@" ;;
   "plugin list") exec omarchy-shell shell listPlugins ;;
+  # A restarted shell loads hyprpeach's service, which records what it loaded;
+  # hyprpeach waits for that record. Slow when the sandbox says so, because the
+  # real one takes seconds and two of them overlapping is a case of its own.
+  "restart shell")
+    [[ -f $HOME/.slow-restart ]] && sleep 1
+    installed="$HOME/.config/omarchy/plugins/hyprpeach/bin/hyprpeach"
+    if [[ -f $HOME/.shell-running && -x $installed ]]; then "$installed" shell-loaded >/dev/null 2>&1; fi
+    exit 0 ;;
   *) exit 0 ;;
 esac
 FAKE
@@ -499,6 +507,21 @@ rm -f "$MARKER"
 : > "$LOG"
 hyprpeach migrate >/dev/null 2>&1
 check "  ...as is one from before releases said which they were" "$(called 'omarchy restart shell')" "1"
+# `hyprpeach upgrade` migrates and then reloads Hyprland, which migrates again
+# a moment later, while the first restart is still under way and the shell is
+# still stale. Two restarts at once start two shells: two bars, side by side.
+echo "3.0.0 0000000" > "$MARKER"
+touch "$HOME/.slow-restart"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1 &
+sleep 0.3
+hyprpeach migrate >/dev/null 2>&1
+wait
+rm -f "$HOME/.slow-restart"
+check "a second migration during the restart does not start a second one" "$(called 'omarchy restart shell')" "1"
+: > "$LOG"
+hyprpeach migrate >/dev/null 2>&1
+check "  ...and the shell it left is on the installed release" "$(called 'omarchy restart shell')" "0"
 rm -f "$HOME/.shell-running"
 : > "$LOG"
 hyprpeach migrate >/dev/null 2>&1
