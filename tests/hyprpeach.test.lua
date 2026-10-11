@@ -379,7 +379,7 @@ end
 -- --------------------------------------------------------------------------
 print("\nthe send bindings read the config field, not a mode")
 do
-  -- Default off: the plain send does not follow, and the ALT variant does.
+  -- The plain send reads `focus_follows_fling`; the ALT variant always follows.
   local _, recorder = fresh_peach({ active_window = { workspace = { id = 5 } } })
   check({ label = "plain send is bound", got = recorder.bound["SUPER + SHIFT + code:12"], want = "Send window to desktop 3" })
   -- Off by default now: the rule covers the day without it.
@@ -392,20 +392,19 @@ do
     want = true,
   })
 
-  -- Press the key for real. This is the whole point of the change: out of the
-  -- box, sending a window must NOT drag your view along with it.
+  -- Press the key for real. Out of the box, sending a window must NOT drag
+  -- your view along with it: one dispatch, the move, and nothing after it.
   recorder.actions["SUPER + SHIFT + code:12"]()
-  -- BY DEFAULT the view goes with the window: move, both panels, refocus.
-  check({ label = "BY DEFAULT a fling takes the view along", got = #recorder.dispatched, want = 4 })
-  check({ label = "  ...starting with the move", got = recorder.dispatched[1].kind, want = "move" })
+  check({ label = "BY DEFAULT a fling leaves you put", got = #recorder.dispatched, want = 1 })
+  check({ label = "  ...it is the move", got = recorder.dispatched[1].kind, want = "move" })
   check({ label = "  ...to bottom desktop 3", got = recorder.dispatched[1].options.workspace, want = "3" })
-  check({ label = "  ...and ending on the window", got = recorder.dispatched[4].options.window ~= nil, want = true })
 
-  -- Opting out makes a fling pure tidying.
-  local opted, opted_recorder = fresh_peach({ active_window = { workspace = { id = 5 } }, focus_follows_fling = false })
+  -- Opting in takes the view along: move, both panels, refocus.
+  local opted, opted_recorder = fresh_peach({ active_window = { workspace = { id = 5 } }, focus_follows_fling = true })
   local _ = opted
   opted_recorder.actions["SUPER + SHIFT + code:12"]()
-  check({ label = "focus_follows_fling = false leaves you put", got = #opted_recorder.dispatched, want = 1 })
+  check({ label = "focus_follows_fling = true takes the view along", got = #opted_recorder.dispatched, want = 4 })
+  check({ label = "  ...and ends on the window", got = opted_recorder.dispatched[4].options.window ~= nil, want = true })
 end
 
 -- --------------------------------------------------------------------------

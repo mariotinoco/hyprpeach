@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 620" width="880" height="620" role="img" aria-labelledby="keys-title keys-desc">
   <title id="keys-title">hyprpeach keymap: SUPER moves your view, SUPER+SHIFT moves the window</title>
-  <desc id="keys-desc">One rule covers the whole keymap. SUPER with a number goes to that desktop and SUPER with left or right steps to the one beside it, moving your view while the windows stay put. SUPER plus SHIFT with a number flings the focused window to that desktop, left and right fling it one along, and up or down flings it to the panel above or below; your view follows the window by default.</desc>
+  <desc id="keys-desc">One rule covers the whole keymap. SUPER with a number goes to that desktop and SUPER with left or right steps to the one beside it, moving your view while the windows stay put. SUPER plus SHIFT with a number flings the focused window to that desktop, left and right fling it one along, and up or down flings it to the panel above or below; your view stays where it is by default.</desc>
   <style>
     :root { color-scheme: light dark; }
     .surface   { fill: #F7F8FA; stroke: #D8DBE3; }
@@ -83,7 +83,7 @@
 
   <text x="28" y="325" class="h2" font-size="14" font-weight="700">SUPER + SHIFT</text>
   <text x="28" y="348" class="peach" font-size="15" font-weight="700">moves the window</text>
-  <text x="28" y="370" class="muted" font-size="12">your view lands with it</text>
+  <text x="28" y="370" class="muted" font-size="12">your view stays where it is</text>
   <rect x="28" y="385" width="172" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="114" y="403" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">super + shift + 1…9</text>
   <rect x="212" y="385" width="37" height="26" rx="6" class="keycap" stroke-width="1.5"/><text x="231" y="403" class="keycap-t mono" font-size="12" font-weight="600" text-anchor="middle">← →</text>
     <rect x="360" y="313" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
@@ -101,12 +101,12 @@
   <polygon points="648,393 662,398 647,405" class="arrowhead"/>
     <rect x="360" y="415" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
     <text x="394.0" y="441" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">1</text>
-    <rect x="442" y="415" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
-    <text x="476.0" y="441" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">2</text>
+    <rect x="442" y="415" width="68" height="62" rx="9" class="chip-on" stroke-width="1.5"/>
+    <text x="476.0" y="441" class="chip-on-t mono" font-size="14" font-weight="700" text-anchor="middle">2</text>
     <rect x="524" y="415" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
     <text x="558.0" y="441" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">3</text>
-    <rect x="606" y="415" width="68" height="62" rx="9" class="chip-on" stroke-width="1.5"/>
-    <text x="640.0" y="441" class="chip-on-t mono" font-size="14" font-weight="700" text-anchor="middle">4</text>
+    <rect x="606" y="415" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
+    <text x="640.0" y="441" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">4</text>
     <rect x="619" y="449" width="42" height="18" rx="4" class="win" stroke-width="1.5"/>
     <rect x="688" y="415" width="68" height="62" rx="9" class="chip" stroke-width="1"/>
     <text x="722.0" y="441" class="chip-txt mono" font-size="14" font-weight="400" text-anchor="middle">5</text>

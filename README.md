@@ -64,7 +64,7 @@ Or skip it entirely — [Install](#install) is the desktops library by hand, and
 <img src="docs/keymap.svg" alt="One rule: SUPER moves your view, SUPER plus SHIFT moves the window. Numbers are absolute and arrows are relative; left and right mean desktops, up and down mean panels." width="100%">
 </div>
 
-Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window focus survives on the axis the panels are stacked on. Your view follows a window you fling.
+Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window focus survives on the axis the panels are stacked on. A window you fling leaves; your view stays where it is. `focus_follows_fling = true` sends it along.
 
 <br>
 
@@ -75,10 +75,10 @@ Nothing else to learn. `SUPER + ↑ ↓` is left alone, so directional window fo
 Works on **any Hyprland ≥ 0.55** — plain Arch, Omarchy, NixOS, whatever runs the compositor. Hyprland 0.55 is where Lua became a first-class config language, which is all this needs: no compiler, no `hyprpm`, no daemon, nothing to install beside it.
 
 ```bash
-git clone --branch v3.1.2 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
+git clone --branch v4.0.0 https://github.com/mariotinoco/hyprpeach ~/.config/hypr/hyprpeach
 ```
 
-**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v3.1.2`.
+**Clone a tag, not a branch.** A release cannot change under you, and upgrading stays a decision you make rather than one that happens the next time you pull. Leave `--branch` off to track `main` and take what comes; upgrade later with `git fetch --tags && git checkout v4.0.0`.
 
 Then in your Hyprland Lua config, **after** whatever binds your number row:
 
@@ -99,7 +99,7 @@ require("hyprpeach").setup({
   },
 
   -- Everything below is a default. Delete any line to keep it.
-  focus_follows_fling         = true,  -- your view lands with a window you fling
+  focus_follows_fling         = false, -- true: your view goes with a window you fling
   notify                      = true,  -- a toast for actions with no on-screen result
   unbind_conflicting_defaults = true,  -- clear stock bindings that move one panel
 
@@ -163,8 +163,8 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 
 ```console
 $ hyprpeach plugin list
-🍑 hyprpeach 3.1.2
-  🍑 desktops                 3.0.4    added      Multi-Monitor Desktops
+🍑 hyprpeach 4.0.0
+  🍑 desktops                 4.0.0    added      Multi-Monitor Desktops
   ├─ 🌱 animated              0.1.0    not added  Animated Desktops
   └─ 🌱 overview              0.2.1    not added  Desktop Overview
   🌱 pin                      0.1.0    not added  Pin
@@ -184,7 +184,7 @@ $ hyprpeach plugin remove desktops
 
 **They update with hyprpeach.** `add` links the plugin's folder inside hyprpeach's clone into Omarchy's plugins folder, rather than copying it out, so the one `omarchy plugin update` that moves hyprpeach moves every plugin you added from it. There is nothing else to keep current, and nothing that can fall behind.
 
-Each has its own version and its own release notes — `ports-v0.1.0` beside hyprpeach's `v3.1.2` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
+Each has its own version and its own release notes — `ports-v0.1.0` beside hyprpeach's `v4.0.0` — so you can see what changed in the piece you use. What you install is always the set that shipped together.
 
 It is done this way because Omarchy installs one plugin per repository and reads one bar widget per plugin: separate widgets need separate plugin folders, and a repository per widget would split one project across several.
 
@@ -221,7 +221,7 @@ Omarchy updates a plugin to the newest commit on `main`. Code only reaches `main
 **Omarchy has no pinning of its own.** `omarchy plugin add` clones the default branch, and `omarchy plugin update` fast-forwards to the newest commit on it. So a pin is a git checkout of a release tag inside the clone:
 
 ```bash
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.1.2
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v4.0.0
 hyprctl reload
 ```
 
@@ -233,7 +233,7 @@ That pins the whole collection: a hyprpeach release fixes the version of every p
 [[ -d ~/.config/omarchy/plugins/hyprpeach ]] || omarchy plugin add https://github.com/mariotinoco/hyprpeach --yes
 omarchy plugin enable hyprpeach
 git -C ~/.config/omarchy/plugins/hyprpeach fetch --quiet --tags --force origin
-git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v3.1.2
+git -C ~/.config/omarchy/plugins/hyprpeach checkout --quiet --detach v4.0.0
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add desktops
 ~/.config/omarchy/plugins/hyprpeach/bin/hyprpeach plugin add ports
 ```
@@ -300,7 +300,7 @@ rm -rf ~/.config/hypr/hyprpeach
 | `super+←` `→` | Focuses a window one place over | Steps the whole desk one desktop, both panels, wrapping |
 | Sending a window to another screen | No binding — `moveworkspacetomonitor` moves the *whole workspace* | One window crosses; both desktops stay intact |
 | Unplugging a monitor | Its windows are stranded where no key can reach them | `gather_rogue_windows` sweeps them back |
-| Flinging a window away | No single-key way to cross screens at all | One key per direction, and your view lands with it |
+| Flinging a window away | No single-key way to cross screens at all | One key per direction, and your view stays put unless you ask |
 | Keeping one screen still | Only per-window, and [not for tiled windows at all](#holding-a-panel) | `SUPER + Y` holds a whole panel where it is |
 | A pinned window | Flips a monitor up or down, seemingly at random, as you change desktop | Stays on the panel you pinned it to |
 

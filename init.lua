@@ -51,14 +51,14 @@ local BAND_WIDTH = 10
 local DEFAULTS = {
   --- WHETHER YOUR VIEW FOLLOWS A WINDOW YOU FLING.
   ---
-  --- Named after `focus follows mouse`, and true for the same reason: the
-  --- pointer of attention should end up where the thing you just acted on is.
-  --- Flinging a window to another desktop or another panel is a decision about
-  --- where you are going to work next, so the view goes with it.
+  --- Named after `focus follows mouse`, and false because the rule in `keys`
+  --- below already says so: SUPER moves you, SUPER + SHIFT moves the window. A
+  --- fling is an act of tidying -- the window leaves and you carry on where you
+  --- are -- and going after it is one more key, SUPER + the same number.
   ---
-  --- Set it false and a fling becomes purely an act of tidying: the window
-  --- leaves and you carry on where you are.
-  focus_follows_fling = true,
+  --- Set it true and every fling is also a decision about where you work next:
+  --- the view goes with the window, to its desktop or its panel.
+  focus_follows_fling = false,
 
   notify = true,
   unbind_conflicting_defaults = true,
