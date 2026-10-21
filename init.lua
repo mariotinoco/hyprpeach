@@ -850,6 +850,22 @@ local function place_tray_popups()
   end
 end
 
+--- THE ANIMATED SCENE IS DRAWN ABOVE THE WALLPAPER ON EVERY MONITOR, whichever
+--- surface was made first. Both are on the background layer, and Hyprland
+--- stacks a layer's surfaces in the order they were created, so the scene was
+--- on top only when the renderer won the race against the shell's wallpaper.
+--- Measured after an Omarchy upgrade restarted both a second apart: the scene
+--- won on the top monitor and lost on the bottom one, which showed the plain
+--- wallpaper.
+---
+--- `order` takes the race away. arrangeLayersForMonitor sorts each layer by it,
+--- highest first, and the first is drawn at the bottom (src/render/Renderer.cpp,
+--- 0.56.2), so the scene's -1 puts it above the wallpaper's default 0. Measured:
+--- an order of 5 put the scene under the wallpaper on both monitors.
+local function stack_scene_above_wallpaper()
+  hl.layer_rule({ match = { namespace = "hyprpeach-scene" }, order = -1 })
+end
+
 --- THE RUNNING DESK IS BROUGHT UP TO THE INSTALLED RELEASE ON EVERY CONFIG
 --- LOAD: a renamed plugin carried over, and a shell still running older
 --- hyprpeach code restarted (bin/hyprpeach, `migrate`).
@@ -899,6 +915,7 @@ function peach.setup(options)
   hl.on("window.open", bring_window_onto_the_desk)
   migrate_renamed_plugins()
   place_tray_popups()
+  stack_scene_above_wallpaper()
 
   state.focus_follows_fling = chosen("focus_follows_fling")
   state.notify = chosen("notify")

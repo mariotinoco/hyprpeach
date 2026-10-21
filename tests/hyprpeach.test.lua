@@ -19,7 +19,7 @@ end
 --- A fresh stub compositor. `dispatched` records every dispatch in order,
 --- which is the only way to catch a paired switch that fires in the wrong one.
 local function stub_hyprland(parameters)
-  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {}, handlers = {}, window_rules = {}, executed = {} }
+  local recorder = { dispatched = {}, events = {}, rules = {}, bound = {}, actions = {}, unbound = {}, notifications = {}, active_window_reads = 0, written = {}, handlers = {}, window_rules = {}, layer_rules = {}, executed = {} }
 
   -- The held-panel state is published to a file for the bar strip to watch, so
   -- writes are captured here rather than landing in the running session's
@@ -71,6 +71,7 @@ local function stub_hyprland(parameters)
     on = function(event, handler) recorder.handlers[event] = handler end,
     exec_cmd = function(command) recorder.executed[#recorder.executed + 1] = command end,
     window_rule = function(rule) recorder.window_rules[#recorder.window_rules + 1] = rule end,
+    layer_rule = function(rule) recorder.layer_rules[#recorder.layer_rules + 1] = rule end,
     notification = { create = function(note) recorder.notifications[#recorder.notifications + 1] = note.text end },
     dsp = {
       focus = function(options) return { kind = "focus", options = options } end,
@@ -170,6 +171,18 @@ do
   check({ label = "  ...that stops it moving its own window", got = toolbox and toolbox.suppress_event, want = "x11configurerequest" })
   check({ label = "  ...and puts it right of the bar, at the bottom, beside the tray", got = toolbox and table.concat(toolbox.move, " "), want = "47 (monitor_h-window_h-10)" })
   check({ label = "no rule for every window: dialogs move themselves for good reasons", got = #recorder.window_rules, want = 1 })
+end
+
+print("\nthe animated scene is drawn above the wallpaper, whichever started first")
+do
+  -- Both are on the background layer; Hyprland draws a lower order on top.
+  local _, recorder = fresh_peach({})
+  local scene
+  for _, rule in ipairs(recorder.layer_rules) do
+    if rule.match and rule.match.namespace == "hyprpeach-scene" then scene = rule end
+  end
+  check({ label = "the scene has a layer rule of its own", got = scene ~= nil, want = true })
+  check({ label = "  ...ordering it below the wallpaper's default 0, which draws it on top", got = scene and scene.order, want = -1 })
 end
 
 print("\na plugin that changed name is carried over when Hyprland loads its config")
