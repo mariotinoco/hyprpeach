@@ -97,6 +97,11 @@ To see a scene on a desk you do not have, give the renderer that desk's
 
 `renderer/layouts/` holds the four desks above.
 
+Adding animated turns Omarchy's own wallpaper off (`omarchy plugin disable
+omarchy.background`): the scene covers every monitor, so the wallpaper under it
+is never seen, and on two 7680 x 2160 panels it held some 740 MiB of video
+memory doing nothing. Removing animated turns it back on.
+
 The program lives in `~/.local/share/hyprpeach/animated` and the build in
 `~/.cache/hyprpeach`. Removing the plugin leaves them; delete those two folders
 to reclaim the space.

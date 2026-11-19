@@ -699,9 +699,14 @@ Panel {
         font.bold: true
       }
 
+      // SIZED BY THE ROW ONLY. The path below is capped at a share of this
+      // column's width; if the column also took its size from what it holds,
+      // the cap would move the column, which moves the cap -- Qt stops after
+      // two passes and says so, which it did here hundreds of times a day.
       ColumnLayout {
         id: rowContent
         Layout.fillWidth: true
+        Layout.preferredWidth: 0
         spacing: Style.space(1)
 
         Text {

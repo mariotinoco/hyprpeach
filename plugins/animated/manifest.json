@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprpeach.animated",
   "name": "Animated Desktops",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "hyprpeach",
   "description": "A living scene behind your desktops — a synthwave grid or a nebula — with a different place for every desktop, one picture across every monitor, and every desktop switch a flight to the next.",
   "kinds": [

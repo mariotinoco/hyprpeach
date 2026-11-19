@@ -407,6 +407,7 @@ check "it is linked" "$(link_of hyprpeach.animated)" "hyprpeach/plugins/animated
 check "its renderer was built once" "$(grep -c '^cargo build' "$LOG")" "1"
 check "  ...with the Rust its mise.toml pins, not whatever is on PATH" "$(grep -c '^mise -C .*/plugins/animated/renderer exec -- cargo build' "$LOG")" "1"
 check "  ...and installed where its service runs it" "$([[ -x $HOME/.local/share/hyprpeach/animated/hyprpeach-animated ]] && echo yes)" "yes"
+check "Omarchy's wallpaper under the scene is turned off" "$(called 'omarchy plugin disable omarchy.background')" "1"
 check "an earlier build's planet imagery is cleared away" "$([[ -e $HOME/.local/share/hyprpeach/animated/assets ]] && echo left || echo gone)" "gone"
 : > "$LOG"
 "$PLUGIN/plugins/animated/prepare" --if-stale
@@ -436,6 +437,7 @@ check "a scene that no longer exists shows the default in effect, as the rendere
 
 hyprpeach plugin remove animated >/dev/null 2>&1
 check "animated comes off" "$([[ -L $(plugins_directory)/hyprpeach.animated ]] && echo linked || echo none)" "none"
+check "  ...and Omarchy's wallpaper comes back" "$(called 'omarchy plugin enable omarchy.background')" "1"
 
 echo
 echo "a plugin that changed name is carried over: link, bar place, files and settings"

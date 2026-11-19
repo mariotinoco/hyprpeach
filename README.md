@@ -50,7 +50,7 @@ From then on it is just `hyprpeach`, which the plugin keeps on your `PATH`. See 
 
 <br>
 
-Fair. `omarchy plugin add` asks before it clones and shows you the URL, and it runs nothing — it only clones. So read the clone at `~/.config/omarchy/plugins/hyprpeach` before you add anything from it; [`bin/hyprpeach`](bin/hyprpeach) is the whole of what `plugin add` does.
+Fair. `omarchy plugin add` asks before it clones and shows you the URL, and without `--enable` it runs nothing — it only clones. So drop `--enable`, read the clone at `~/.config/omarchy/plugins/hyprpeach`, then `omarchy plugin enable hyprpeach`; [`bin/hyprpeach`](bin/hyprpeach) is the whole of what `plugin add` does.
 
 Or skip it entirely — [Install](#install) is the desktops library by hand, and it is not long.
 
@@ -149,7 +149,9 @@ omarchy bar position left
 
 The bar goes **vertical** because the strip is a column of nine cells: on a horizontal bar they spend width competing with the clock and the tray, and a desk this model is for is wide. It is the one line here that is a preference rather than a consequence — `omarchy bar position top` (or `bottom`, or `right`) puts it back, and only adding desktops again will move it.
 
-Both widgets are displaced rather than merely unused. `omarchy.workspaces` [cannot draw a hyprpeach desk](#the-bar-strip) at all. `omarchy.menu` is the widget ahead of the strip in the left section, and the strip is built to lead it — it reaches out to line its first tile up with the edge of a tiled window, which is only the right place to be when nothing sits in front of it. The menu is still one keypress away on `SUPER`.
+Both widgets are displaced rather than merely unused. `omarchy.workspaces` [cannot draw a hyprpeach desk](#the-bar-strip) at all. `omarchy.menu` is the widget ahead of the strip in the left section, and the strip is built to lead it — it reaches out to line its first tile up with the edge of a tiled window, which is only the right place to be when nothing sits in front of it. The menu is still one chord away on `SUPER + SPACE`.
+
+It also switches off Omarchy's per-monitor workspaces, from inside `setup()` rather than with a command, because there is no command for it. Since 4.5 Omarchy gives each monitor its own block of ten numbers and, at login, on every reload and on every hotplug, moves monitors and renumbers workspaces to fit them — which on a hyprpeach desk puts a panel on a workspace that is no desktop and strands whatever opens there. hyprpeach already decides which workspace belongs to which monitor, so Omarchy's re-sorting is turned off and the rest of it is left alone.
 
 `hyprpeach plugin remove desktops` takes the block back out of `hyprland.lua` and puts both widgets back. It leaves the bar where it is, because where it was before is not recorded anywhere.
 
@@ -164,11 +166,11 @@ hyprpeach is **one plugin** in Omarchy's registry, carrying several. Add the one
 ```console
 $ hyprpeach plugin list
 🍑 hyprpeach 3.1.4
-  🍑 desktops                 3.0.5    added      Multi-Monitor Desktops
-  ├─ 🌱 animated              0.1.0    not added  Animated Desktops
+  🍑 desktops                 3.0.6    added      Multi-Monitor Desktops
+  ├─ 🌱 animated              0.1.1    not added  Animated Desktops
   └─ 🌱 overview              0.2.1    not added  Desktop Overview
   🌱 pin                      0.1.0    not added  Pin
-  🌱 ports                    0.1.0    not added  Local Ports
+  🌱 ports                    0.1.1    not added  Local Ports
 
 $ hyprpeach plugin add ports
 $ hyprpeach plugin remove desktops
@@ -338,7 +340,7 @@ On a held panel the bar strip **becomes a padlock**: the tile it is holding stop
 
 ## Bindings
 
-**hyprpeach adds five chords** — `SUPER + SHIFT + arrows`, and `SUPER + Y` to [hold a panel](#holding-a-panel). Everything else on the keymap is a chord your compositor already binds, taken over so it means the same thing on every panel; a workspace binding hyprpeach *ignores* is a binding that splits your desk.
+**hyprpeach adds one chord of its own**, `SUPER + Y` to [hold a panel](#holding-a-panel). Everything else on the keymap is a chord your compositor already binds, taken over so it means the same thing on every panel; a workspace binding hyprpeach *ignores* is a binding that splits your desk.
 
 ### What this displaces
 
@@ -349,6 +351,9 @@ Stock Omarchy bindings, given up on purpose: on a two-panel desk the desktop str
 | `SUPER + ←` `→` | Focus left / right window | Previous / next desktop |
 | `SUPER + SHIFT + ←` `→` | Swap window left / right | Fling window one desktop along |
 | `SUPER + SHIFT + ↑` `↓` | Swap window up / down | Fling window to the panel above / below |
+| `SUPER + 0` | Workspace 10 | [The overview](plugins/overview/README.md) |
+| `SUPER + TAB` | Next workspace, this monitor only | [The overview](plugins/overview/README.md) |
+| `SUPER + SHIFT + ALT + arrows` | Move this monitor's workspace to another | Nothing — it tears a desktop in half |
 
 **`SUPER + ↑` `↓` is left alone**, so directional window focus survives on the axis where the panels are stacked.
 
@@ -380,6 +385,7 @@ local peach = require("hyprpeach")
 | `peach.send_active_window_to_relative_desktop({ step, follow })` | Fling it ±N desktops along, wrapping, from the window's own desktop |
 | `peach.send_active_window_to_panel({ step, follow })` | Move a window between panels, keeping its desktop |
 | `peach.swap_panels()` | Swap what the two panels show |
+| `peach.toggle_held_panel()` | [Hold](#holding-a-panel) the panel under the pointer, or let it go |
 | `peach.gather_rogue_windows()` | Rescue windows stranded outside every band |
 | `peach.toggle_overview()` | Open or close [the overview](plugins/overview/README.md) on every monitor |
 | `peach.describe()` | One line of live state, and whether the panels agree |
@@ -407,7 +413,7 @@ panel 1 → desktop 5, panel 2 → desktop 5  [paired]
 
 *Omarchy only. Everything above works without it.*
 
-Omarchy's own `omarchy.workspaces` widget cannot draw a hyprpeach desk. It filters to `id > 0 && id <= 10`, so a second monitor's band is invisible to it — every bar on every screen draws the *first* monitor's workspaces. And clicking one dispatches a single focus, splitting the pair the moment you touch the mouse.
+Omarchy's own `omarchy.workspaces` widget cannot draw a hyprpeach desk. It numbers each monitor by Omarchy's per-monitor blocks, which hyprpeach switches off and which never agreed with its bands — the top panel was handed 1–10. And clicking one focuses a single monitor, splitting the pair the moment you touch the mouse.
 
 The replacement lives in `plugins/desktops/`, and `hyprpeach plugin add desktops` [puts it on your bar](#yeah-yeah-whatever--gimme-the-install-command-for-omarchy).
 

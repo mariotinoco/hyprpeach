@@ -281,6 +281,12 @@ command_plugin_add() {
   fi
 
   [[ $name != desktops ]] || add_desktops_to_hyprland
+  # The scene covers every monitor, so Omarchy's wallpaper under it is never
+  # seen, and it is not free: on two 7680x2160 panels and a 1600x900 one, the
+  # shell held 826 MiB of video memory with Omarchy's background on and 85 MiB
+  # with it off (`nvidia-smi`, measured both ways twice). Outside the first add, so adding animated again
+  # turns it off on a desk that had it from before. Removing animated puts it back.
+  [[ $name != animated ]] || omarchy plugin disable omarchy.background >/dev/null 2>&1 || true
   add_plugin_to_hyprland "$name"
   # Here as well as in the service, because this is the first command a
   # registry install runs -- by its full path, before anything is on PATH.
@@ -308,6 +314,7 @@ command_plugin_remove() {
   [[ $name != desktops ]] || remove_desktops_from_hyprland
   remove_plugin_from_hyprland "$name"
   omarchy plugin remove "$id" --yes >/dev/null
+  [[ $name != animated ]] || omarchy plugin enable omarchy.background >/dev/null 2>&1 || true
   say "removed $id"
 }
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 556" width="1040" height="556" role="img" aria-labelledby="diagram-title diagram-description">
   <title id="diagram-title">hyprpeach: a desktop is a set of workspaces, one per monitor</title>
-  <desc id="diagram-description">Left: with Hyprland's default bindings, pressing super+2 teleports focus to whichever monitor happens to own workspace 2, and the other monitor does not move. Right: with hyprpeach, monitors hold fixed bands of workspaces (bottom 1 to 10, top 11 to 20) and one press of super+2 moves both panels to their own desktop 2 at once.</desc>
+  <desc id="diagram-description">Left: with plain Hyprland's bindings, pressing super+2 teleports focus to whichever monitor happens to own workspace 2, and the other monitor does not move. Right: with hyprpeach, monitors hold fixed bands of workspaces (bottom 1 to 9, top 11 to 19) and one press of super+2 moves both panels to their own desktop 2 at once.</desc>
   <style>
     :root { color-scheme: light dark; }
     .surface   { fill: #F7F8FA; stroke: #D8DBE3; }
@@ -52,7 +52,7 @@
   <line x1="28" y1="60" x2="1012" y2="60" class="rule" stroke-width="1"/>
 
   <!-- ============================= LEFT: default ============================= -->
-  <text x="28" y="92" class="h2" font-size="14" font-weight="700">HYPRLAND DEFAULT</text>
+  <text x="28" y="92" class="h2" font-size="14" font-weight="700">PLAIN HYPRLAND</text>
   <text x="192" y="92" class="warn" font-size="13">one dispatch — only ever moves one screen</text>
 
   <rect x="28" y="106" width="456" height="82" rx="9" class="surface-2" stroke-width="1.5"/>
@@ -91,7 +91,7 @@
 
   <rect x="556" y="106" width="456" height="82" rx="9" class="surface" stroke-width="1.5"/>
   <text x="572" y="131" class="muted" font-size="11" font-weight="600">TOP PANEL</text>
-  <text x="644" y="131" class="muted mono" font-size="10.5">·  band 11–20</text>
+  <text x="644" y="131" class="muted mono" font-size="10.5">·  band 11–19</text>
   <g class="mono" font-size="12">
     <rect x="572" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="589" y="161" class="chip-txt" text-anchor="middle">11</text>
     <rect x="610" y="142" width="34" height="28" rx="5" class="chip-on" stroke-width="1.5"/><text x="627" y="161" class="chip-on-t" font-weight="700" text-anchor="middle">12</text>
@@ -102,13 +102,12 @@
     <rect x="800" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="817" y="161" class="chip-txt" text-anchor="middle">17</text>
     <rect x="838" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="855" y="161" class="chip-txt" text-anchor="middle">18</text>
     <rect x="876" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="893" y="161" class="chip-txt" text-anchor="middle">19</text>
-    <rect x="914" y="142" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="931" y="161" class="chip-txt" text-anchor="middle">20</text>
   </g>
-  <text x="962" y="161" class="peach mono" font-size="16" font-weight="700">↑</text>
+  <text x="924" y="161" class="peach mono" font-size="16" font-weight="700">↑</text>
 
   <rect x="556" y="196" width="456" height="82" rx="9" class="surface" stroke-width="1.5"/>
   <text x="572" y="221" class="muted" font-size="11" font-weight="600">BOTTOM PANEL</text>
-  <text x="664" y="221" class="muted mono" font-size="10.5">·  band 1–10  ·  eye level, keeps the focus</text>
+  <text x="664" y="221" class="muted mono" font-size="10.5">·  band 1–9  ·  eye level, keeps the focus</text>
   <g class="mono" font-size="12">
     <rect x="572" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="589" y="251" class="chip-txt" text-anchor="middle">1</text>
     <rect x="610" y="232" width="34" height="28" rx="5" class="chip-on" stroke-width="1.5"/><text x="627" y="251" class="chip-on-t" font-weight="700" text-anchor="middle">2</text>
@@ -119,9 +118,8 @@
     <rect x="800" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="817" y="251" class="chip-txt" text-anchor="middle">7</text>
     <rect x="838" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="855" y="251" class="chip-txt" text-anchor="middle">8</text>
     <rect x="876" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="893" y="251" class="chip-txt" text-anchor="middle">9</text>
-    <rect x="914" y="232" width="34" height="28" rx="5" class="chip" stroke-width="1"/><text x="931" y="251" class="chip-txt" text-anchor="middle">10</text>
   </g>
-  <text x="962" y="251" class="peach mono" font-size="16" font-weight="700">↑</text>
+  <text x="924" y="251" class="peach mono" font-size="16" font-weight="700">↑</text>
 
   <g class="mono">
     <rect x="556" y="300" width="92" height="30" rx="6" class="keycap" stroke-width="1.5"/>
@@ -139,8 +137,8 @@
   <rect x="28" y="420" width="984" height="112" rx="11" class="band" stroke-width="1.5"/>
   <text x="52" y="452" class="h2" font-size="13.5" font-weight="700">THE WHOLE MODEL, IN ONE LINE</text>
 
-  <text x="52" y="488" class="mono peach" font-size="21" font-weight="700">desktop N  =  { N,  N + count,  N + 2·count,  … }</text>
-  <text x="52" y="512" class="muted" font-size="12.5">One workspace per monitor, bottom panel first — `count` is how many desktops you have, so on the bottom panel desktop N is workspace N.</text>
+  <text x="52" y="488" class="mono peach" font-size="21" font-weight="700">desktop N  =  { N,  N + 10,  N + 20,  … }</text>
+  <text x="52" y="512" class="muted" font-size="12.5">One workspace per monitor, bottom panel first, ten numbers apart — so on the bottom panel desktop N is simply workspace N.</text>
   
 
 </svg>

@@ -274,6 +274,12 @@ do
   check({ label = "the 0 key is cleared too", got = unbound:find("SUPER + code:19", 1, true) ~= nil, want = true })
   check({ label = "no unbind names a bare digit", got = unbound:find("SUPER %+ %d") == nil, want = true })
   check({ label = "the monitor-hopping TAB is unbound", got = unbound:find("SUPER + TAB", 1, true) ~= nil, want = true })
+  for _, arrow in ipairs({ "LEFT", "RIGHT", "UP", "DOWN" }) do
+    check({
+      label = "Omarchy's move-workspace-to-monitor " .. arrow .. " is unbound",
+      got = unbound:find("SUPER + SHIFT + ALT + " .. arrow, 1, true) ~= nil, want = true,
+    })
+  end
   check({ label = "desktop 1 is bound", got = recorder.bound["SUPER + code:10"], want = "Focus desktop 1" })
 end
 
@@ -662,8 +668,17 @@ do
   -- be read back out of Quickshell for a monitor that is not focused.
   check({ label = "holding publishes the monitor name and the desktop it holds", got = recorder.written[path], want = "TOP 3\n" })
 
+  -- Something outside this file emptied it once, and the hold went undrawn.
+  recorder.written[path] = ""
+  peach.focus_desktop({ desktop = 5 })
+  check({ label = "a switch while held publishes the hold again", got = recorder.written[path], want = "TOP 3\n" })
+
   peach.toggle_held_panel()
   check({ label = "releasing publishes empty again", got = recorder.written[path], want = "" })
+
+  recorder.written[path] = nil
+  peach.focus_desktop({ desktop = 6 })
+  check({ label = "a switch with nothing held writes nothing", got = recorder.written[path], want = nil })
 end
 
 -- --------------------------------------------------------------------------
@@ -699,6 +714,24 @@ do
     if recorder.dispatched[index].kind == "focus" then target = recorder.dispatched[index].options.workspace end
   end
   check({ label = "stepping reads the desk, not the held panel", got = target, want = "6" })
+end
+
+-- --------------------------------------------------------------------------
+print("\nOmarchy's per-monitor workspaces never renumber the desk")
+do
+  -- Shaped like Omarchy 4.5's monitor-workspaces.lua: the handlers it
+  -- registers look `reconcile` up on the module table when they fire.
+  local reconciled = 0
+  local module = { reconcile = function() reconciled = reconciled + 1 end }
+  _G.o = { workspaces = module }
+  local omarchy_reload_handler = function() module.reconcile() end
+  fresh_peach({})
+  omarchy_reload_handler()
+  check({ label = "a config reload after setup reconciles nothing", got = reconciled, want = 0 })
+  _G.o = nil
+
+  local ok = pcall(fresh_peach, {})
+  check({ label = "and a desk without Omarchy's module sets up all the same", got = ok, want = true })
 end
 
 -- --------------------------------------------------------------------------

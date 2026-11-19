@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "hyprpeach.ports",
   "name": "Local Ports",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "hyprpeach",
   "description": "Local dev servers on the Omarchy bar: an anchor with a red dot while one is listening, each port grouped by the git repository, worktree and branch it runs from, and one confirmed click to stop it.",
   "kinds": [

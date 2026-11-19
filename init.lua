@@ -133,9 +133,16 @@ local DEFAULTS = {
 --- Turning a hyprpeach binding off has to mean the key does nothing -- not
 --- that it quietly goes back to splitting the desk.
 local STOCK_NUMBER_ROW_MODIFIERS = { "SUPER", "SUPER + SHIFT", "SUPER + SHIFT + ALT" }
+--- The SUPER + SHIFT + ALT arrows are Omarchy's "move workspace to monitor":
+--- one panel's half of a desktop carried onto the other, which in 4.5 also
+--- renumbers it into that monitor's block (o.workspaces.move_to_monitor,
+--- default/hypr/bindings/tiling.lua) -- a desktop torn in half and its
+--- windows put on a workspace that is no desktop at all.
 local STOCK_WORKSPACE_CHORDS = {
   "SUPER + TAB", "SUPER + SHIFT + TAB", "SUPER + CTRL + TAB",
   "SUPER + mouse_down", "SUPER + mouse_up",
+  "SUPER + SHIFT + ALT + LEFT", "SUPER + SHIFT + ALT + RIGHT",
+  "SUPER + SHIFT + ALT + UP", "SUPER + SHIFT + ALT + DOWN",
 }
 
 --- Populated by `setup`. Nothing here is written anywhere else.
@@ -373,6 +380,16 @@ function peach.focus_desktop(parameters)
     end
   end
   realign_pinned_windows()
+  -- A HOLD IS REPUBLISHED ON EVERY SWITCH, because a switch is the moment a
+  -- hold is noticed. Measured on this desk: a panel held in memory while the
+  -- file said nothing was held -- no padlock anywhere, and a desk that looked
+  -- like paired switching had simply stopped working. What emptied the file
+  -- was not found; republishing here means whatever it was lasts until the
+  -- next keypress. Only while something is held, so an ordinary switch writes
+  -- nothing and wakes no bar.
+  for _, band in ipairs(state.bands) do
+    if band.held then publish_held_panels(); break end
+  end
   -- ANNOUNCED, not left to be inferred. Everything that reacts to the desk --
   -- the number on screen, the overview, the animated desktops -- hears this one event
   -- per switch. Reading switches off the focused workspace instead mistook
@@ -685,9 +702,9 @@ local function unbind_conflicting_defaults(parameters)
     end
   end
   -- Every one of these is a single dispatch in the stock config, so every one
-  -- of them splits the panels apart. `e+1` is the clearest: it walks to the
-  -- next workspace that EXISTS, which on a two-panel desk is usually the other
-  -- monitor, making the "next workspace" key a monitor hop in disguise.
+  -- of them splits the panels apart. SUPER + TAB is the clearest: `m+1` walks
+  -- to the next workspace on the focused monitor only, so one panel turns and
+  -- the other is left behind.
   for _, chord in ipairs(STOCK_WORKSPACE_CHORDS) do
     hl.unbind(chord)
   end
@@ -776,22 +793,6 @@ local function create_bindings(parameters)
   bind(keys.gather_rogue_windows, function() peach.gather_rogue_windows() end, "Gather stranded windows")
 end
 
---- Configure hyprpeach and install its workspace rules and bindings.
----
---- ONLY `monitors_bottom_to_top` IS REQUIRED. It is a list of monitor
---- selectors in PHYSICAL order, bottom first; the first entry takes the
---- un-offset band, so on that monitor desktop N is simply workspace N.
---- Everything else falls back to DEFAULTS above, which are tuned so that a
---- stock Omarchy or Hyprland keymap keeps working.
----
---- PREFER `desc:` SELECTORS WITH THE SERIAL. hyprsplit and
---- split-monitor-workspaces assign bands by connector name or monitor ID,
---- which is fine until two monitors are the same model: connector names change
---- when cables move ports, and then the desktops silently swap screens with
---- nothing reporting it. `hyprctl monitors all` prints the full description;
---- the trailing token is the serial.
----
---- `keys` is merged key-by-key, so overriding one chord keeps the rest.
 --- A FLOATING WINDOW THAT OPENS OFF THE DESK IS BROUGHT ONTO IT.
 ---
 --- desktops puts the bar down the left edge (bin/hyprpeach says why). Apps
@@ -866,6 +867,30 @@ local function stack_scene_above_wallpaper()
   hl.layer_rule({ match = { namespace = "hyprpeach-scene" }, order = -1 })
 end
 
+--- Omarchy's per-monitor workspaces, turned off: this file already decides
+--- which workspace belongs to which monitor, and the two disagree.
+---
+--- Omarchy 4.5 gives each monitor a block of ten, numbered by the order it
+--- first saw them -- here the TOP panel got 1-10 -- and reconciles at login,
+--- on every config reload and on every hotplug: a monitor showing a workspace
+--- outside its block is sent to its own, and an occupied workspace on the
+--- "wrong" monitor is renumbered into it with `change_id`
+--- (/usr/share/omarchy/default/hypr/monitor-workspaces.lua, 4.5.0). Measured
+--- on this desk: one reconcile put the top panel on 10, which is no desktop,
+--- so whatever opened there vanished on the next switch; it was queuing the
+--- renumbering of the occupied desktops too.
+---
+--- Its handlers call `M.reconcile()` through the module table, which Omarchy
+--- publishes as `o.workspaces`, so replacing that one function silences every
+--- trigger and leaves the rest of the module -- and its exported calls --
+--- alone. Run from setup, after Omarchy's defaults have loaded and before
+--- Hyprland fires `hyprland.start`. A desk without that module is untouched.
+local function keep_omarchy_from_renumbering_workspaces()
+  local omarchy = rawget(_G, "o")
+  if type(omarchy) ~= "table" or type(omarchy.workspaces) ~= "table" then return end
+  omarchy.workspaces.reconcile = function() end
+end
+
 --- THE RUNNING DESK IS BROUGHT UP TO THE INSTALLED RELEASE ON EVERY CONFIG
 --- LOAD: a renamed plugin carried over, and a shell still running older
 --- hyprpeach code restarted (bin/hyprpeach, `migrate`).
@@ -888,6 +913,22 @@ local function migrate_renamed_plugins()
   hl.exec_cmd((os.getenv("HOME") or "") .. "/.config/omarchy/plugins/hyprpeach/bin/hyprpeach migrate")
 end
 
+--- Configure hyprpeach and install its workspace rules and bindings.
+---
+--- ONLY `monitors_bottom_to_top` IS REQUIRED. It is a list of monitor
+--- selectors in PHYSICAL order, bottom first; the first entry takes the
+--- un-offset band, so on that monitor desktop N is simply workspace N.
+--- Everything else falls back to DEFAULTS above, which are tuned so that a
+--- stock Omarchy or Hyprland keymap keeps working.
+---
+--- PREFER `desc:` SELECTORS WITH THE SERIAL. hyprsplit and
+--- split-monitor-workspaces assign bands by connector name or monitor ID,
+--- which is fine until two monitors are the same model: connector names change
+--- when cables move ports, and then the desktops silently swap screens with
+--- nothing reporting it. `hyprctl monitors all` prints the full description;
+--- the trailing token is the serial.
+---
+--- `keys` is merged key-by-key, so overriding one chord keeps the rest.
 function peach.setup(options)
   options = options or {}
   if options.monitors_bottom_to_top == nil or #options.monitors_bottom_to_top < 1 then
@@ -916,6 +957,7 @@ function peach.setup(options)
   migrate_renamed_plugins()
   place_tray_popups()
   stack_scene_above_wallpaper()
+  keep_omarchy_from_renumbering_workspaces()
 
   state.focus_follows_fling = chosen("focus_follows_fling")
   state.notify = chosen("notify")

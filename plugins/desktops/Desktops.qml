@@ -9,11 +9,12 @@ import qs.Ui
 // Desktop indicators for hyprpeach.
 //
 // Omarchy's own omarchy.workspaces widget cannot show a hyprpeach desk, for two
-// reasons that are easy to miss. It filters to `id > 0 && id <= 10`, so a second
-// monitor's band (11-20) is invisible to it — every bar on every screen draws the
-// FIRST monitor's workspaces. And clicking one dispatches a single
-// `hl.dsp.focus({ workspace })`, which moves one panel and leaves the other
-// behind, splitting the pair the moment you use the mouse.
+// reasons that are easy to miss. It numbers each monitor by Omarchy's
+// per-monitor blocks (~/.local/state/omarchy/monitor-workspaces, 4.5), which
+// hyprpeach switches off and which never matched its bands -- on the desk this
+// was written on, the top panel was given 1-10, the workspaces of the bottom
+// one. And clicking one focuses a single monitor, which moves one panel and
+// leaves the other behind, splitting the pair the moment you use the mouse.
 //
 // This widget draws DESKTOPS rather than workspace IDs, reads them from the
 // monitor this particular bar is on, and clicks through to hyprpeach so both
@@ -126,15 +127,13 @@ BarWidget {
   // THIS BAR'S OWN MONITOR, not whichever workspace has the focus.
   //
   // Reading the focused workspace is right exactly while the panels agree, and
-  // they are built to — so the difference never showed. A held panel breaks it
+  // they are built to -- so the difference never showed. A held panel breaks it
   // on purpose: with the pointer resting on a held screen the focus sits there
   // too, and every other bar on the desk would light up the held panel's
   // desktop instead of its own. Each bar answers for the screen it is drawn on.
   // A held panel shows what it is holding; every other panel shows the desk.
   //
-  // Reading the focused workspace is right exactly while the panels agree, and
-  // they are built to -- so the difference never showed. Holding breaks it on
-  // purpose, and the held number cannot be read back out of Quickshell:
+  // And the held number cannot be read back out of Quickshell:
   // measured with the desk on 8 and this panel held on 1, Quickshell reported
   // this monitor's active workspace as 8. So the library publishes the number
   // it already knows, and this trusts that.
